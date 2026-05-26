@@ -34,7 +34,7 @@ services:
     volumes:
       - ./secrets:/run/secrets:ro
     ports:
-      - "8000:8000"
+      - "${BACKEND_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
@@ -47,7 +47,7 @@ services:
     environment:
       NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-http://localhost:8000}
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
     depends_on:
       - backend
 
