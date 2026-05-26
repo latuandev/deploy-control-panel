@@ -1,0 +1,22 @@
+.env
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+*.sqlite3
+.venv/
+venv/
+
+# Node
+node_modules/
+.next/
+out/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local secrets
+secrets/*
+!secrets/.gitkeep
+
