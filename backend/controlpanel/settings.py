@@ -107,21 +107,6 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=int(env("JWT_REFRESH_DAYS", "7"))),
 }
 
-TARGET_SSH = {
-    "HOST": env("TARGET_SSH_HOST"),
-    "PORT": int(env("TARGET_SSH_PORT", "22")),
-    "USER": env("TARGET_SSH_USER", "tuanle"),
-    "KEY_PATH": env("TARGET_SSH_KEY_PATH", "/run/secrets/deploy_panel_key"),
-    "KEY_PASSPHRASE": env("TARGET_SSH_KEY_PASSPHRASE") or None,
-    "KNOWN_HOSTS": env("TARGET_SSH_KNOWN_HOSTS") or None,
-    "AUTO_ADD_HOST_KEY": env_bool("SSH_AUTO_ADD_HOST_KEY", False),
-    "REMOTE_RUNNER": env("TARGET_REMOTE_RUNNER", "/opt/apps/scripts/run-deploy-job.sh"),
-    "REMOTE_LOG_DIR": env("TARGET_REMOTE_LOG_DIR", "/home/tuanle/logs/deploy"),
-    "CONNECT_TIMEOUT": int(env("TARGET_SSH_CONNECT_TIMEOUT", "10")),
-    "COMMAND_TIMEOUT": int(env("TARGET_SSH_COMMAND_TIMEOUT", "30")),
-    "STREAM_STATUS_POLL_SECONDS": float(env("TARGET_STREAM_STATUS_POLL_SECONDS", "2")),
-}
-
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -142,4 +127,3 @@ LOGGING = {
         "level": env("LOG_LEVEL", "INFO"),
     },
 }
-

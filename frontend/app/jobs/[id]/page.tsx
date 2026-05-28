@@ -184,8 +184,9 @@ export default function JobDetailPage() {
         ) : null}
 
         {job ? (
-          <section className="mb-4 grid gap-3 md:grid-cols-4">
-            <Meta label="Remote job" value={job.remote_job_id} />
+          <section className="mb-4 grid gap-3 md:grid-cols-5">
+            <Meta label="Job" value={job.agent_run_id || job.id} />
+            <Meta label="Target" value={job.target.name} />
             <Meta label="Started by" value={job.started_by} />
             <Meta label="Started" value={formatDate(job.started_at)} />
             <Meta label="Exit code" value={job.exit_code === null ? "Pending" : String(job.exit_code)} />

@@ -1,4 +1,4 @@
-.PHONY: up down logs migrate createsuperuser shell-backend seed-scripts
+.PHONY: up down logs migrate createsuperuser shell-backend
 
 up:
 	docker compose up --build
@@ -17,7 +17,3 @@ createsuperuser:
 
 shell-backend:
 	docker compose exec backend python manage.py shell
-
-seed-scripts:
-	docker compose exec backend python manage.py seed_scripts
-
