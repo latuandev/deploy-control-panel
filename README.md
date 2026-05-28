@@ -92,6 +92,20 @@ Private web UI for starting allowlisted deploy scripts on an AlmaLinux 9 target 
    docker compose up --build
    ```
 
+   When running behind an HTTPS reverse proxy, set the public hosts in `.env`
+   before building the images. For example:
+
+   ```bash
+   DJANGO_DEBUG=false
+   DJANGO_ALLOWED_HOSTS=api.example.com,localhost,127.0.0.1,backend
+   CORS_ALLOWED_ORIGINS=https://example.com
+   CSRF_TRUSTED_ORIGINS=https://example.com,https://api.example.com
+   NEXT_PUBLIC_API_BASE_URL=https://api.example.com
+   ```
+
+   `NEXT_PUBLIC_API_BASE_URL` is compiled into the Next.js frontend image, so
+   rebuild the frontend after changing it.
+
 8. Create the Django superuser:
 
    ```bash
