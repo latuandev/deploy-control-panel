@@ -1,5 +1,14 @@
 import { clearTokens, getAccessToken, getRefreshToken, storeAccessToken } from "./auth";
-import type { DeploymentJob, ScriptDefinition, TokenPair } from "./types";
+import type {
+  DeploymentJob,
+  CreatedTargetServer,
+  ScriptDefinition,
+  ScriptDefinitionPayload,
+  TargetServer,
+  TargetServerPayload,
+  TokenPair,
+  UserProfile
+} from "./types";
 
 export const API_BASE_URL =
   process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "http://localhost:8000";
@@ -23,8 +32,39 @@ export async function login(username: string, password: string): Promise<TokenPa
   });
 }
 
-export async function listScripts(): Promise<ScriptDefinition[]> {
-  return apiFetch<ScriptDefinition[]>("/api/scripts/");
+export async function getCurrentUser(): Promise<UserProfile> {
+  return apiFetch<UserProfile>("/api/me/");
+}
+
+export async function listTargets(): Promise<TargetServer[]> {
+  return apiFetch<TargetServer[]>("/api/targets/");
+}
+
+export async function createTarget(payload: TargetServerPayload): Promise<CreatedTargetServer> {
+  return apiFetch<CreatedTargetServer>("/api/targets/", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function testTargetConnection(id: number): Promise<{ detail: string }> {
+  return apiFetch<{ detail: string }>(`/api/targets/${id}/test-connection/`, {
+    method: "POST"
+  });
+}
+
+export async function listScripts(includeDisabled = false): Promise<ScriptDefinition[]> {
+  const query = includeDisabled ? "?include_disabled=true" : "";
+  return apiFetch<ScriptDefinition[]>(`/api/scripts/${query}`);
+}
+
+export async function createScript(
+  payload: ScriptDefinitionPayload
+): Promise<ScriptDefinition> {
+  return apiFetch<ScriptDefinition>("/api/scripts/", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
 }
 
 export async function listJobs(): Promise<DeploymentJob[]> {
@@ -130,4 +170,3 @@ function extractErrorMessage(payload: unknown): string | null {
   }
   return null;
 }
-

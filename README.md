@@ -18,78 +18,41 @@ This repository stores the code for the Deploy Control Panel.
 
 # Deploy Control Panel
 
-Private web UI for starting allowlisted deploy scripts on an AlmaLinux 9 target server over SSH, watching live logs, and keeping job history.
+Private web UI for running allowlisted deploy scripts on customer servers through an outbound target-side agent. The control panel does not need SSH access to target servers.
 
 ## Stack
 
 - Frontend: Next.js, TypeScript, App Router, Tailwind CSS
-- Backend: Django, Django REST Framework, SimpleJWT, Paramiko
+- Backend: Django, Django REST Framework, SimpleJWT
 - Database: PostgreSQL 16
+- Target runtime: Python agent installed on each target server
 - Live logs: Django Server-Sent Events consumed by `@microsoft/fetch-event-source`
 - Runtime: Docker Compose
 
+## How It Works
+
+1. A staff user creates a target server in the dashboard.
+2. The control panel generates a one-time agent token for that target.
+3. The customer installs `ops/target-agent/deploy_agent.py` on their server and runs it with that token.
+4. The agent connects outbound to the control panel, polls for queued jobs, runs local deploy scripts, and pushes logs/status back.
+5. Users start deploy jobs from the dashboard and watch logs in real time.
+
+The service never asks customers to upload their existing SSH private keys.
+
 ## Local Setup
 
-1. Create the SSH key on VPS #2:
-
-   ```bash
-   mkdir -p secrets
-   ssh-keygen -t ed25519 -f secrets/deploy_panel_key -C "deploy-panel"
-   chmod 600 secrets/deploy_panel_key
-   ```
-
-2. Add the public key to the AlmaLinux 9 target server:
-
-   ```bash
-   ssh-copy-id -i secrets/deploy_panel_key.pub tuanle@TARGET_SERVER_IP
-   ```
-
-   If `ssh-copy-id` is unavailable, append `secrets/deploy_panel_key.pub` to `/home/tuanle/.ssh/authorized_keys` on the target server.
-
-3. Copy the reference wrapper to the target server:
-
-   ```bash
-   scp ops/target-server/run-deploy-job.sh tuanle@TARGET_SERVER_IP:/tmp/run-deploy-job.sh
-   ssh tuanle@TARGET_SERVER_IP
-   sudo mkdir -p /opt/apps/scripts
-   sudo mv /tmp/run-deploy-job.sh /opt/apps/scripts/run-deploy-job.sh
-   sudo chmod 750 /opt/apps/scripts/run-deploy-job.sh
-   sudo chown tuanle:tuanle /opt/apps/scripts/run-deploy-job.sh
-   ```
-
-   The app does not install this file automatically.
-
-4. Create the target log directory:
-
-   ```bash
-   ssh tuanle@TARGET_SERVER_IP
-   mkdir -p /home/tuanle/logs/deploy
-   chmod 750 /home/tuanle/logs/deploy
-   ```
-
-5. Set target server permissions:
-
-   ```bash
-   chmod 750 /opt/apps/scripts/deploy-coin-identifier.sh
-   chmod 750 /opt/apps/scripts/deploy-hikoni.sh
-   chown tuanle:tuanle /opt/apps/scripts/deploy-coin-identifier.sh
-   chown tuanle:tuanle /opt/apps/scripts/deploy-hikoni.sh
-   ```
-
-   If the deploy scripts need privileged operations, grant only the exact required `sudo` commands to `tuanle`; do not allow arbitrary shell execution.
-
-6. Create `.env`:
+1. Create `.env`:
 
    ```bash
    cp .env.example .env
    ```
 
-   Edit `TARGET_SSH_HOST`, database password, `DJANGO_SECRET_KEY`, and any SSH settings. For production, set `SSH_AUTO_ADD_HOST_KEY=false` and provide `TARGET_SSH_KNOWN_HOSTS`.
+   Edit the database password, `DJANGO_SECRET_KEY`, and public web/API URLs.
 
-7. Start the stack:
+2. Start the stack:
 
    ```bash
-   docker compose up --build
+   docker compose up -d --build
    ```
 
    When running behind an HTTPS reverse proxy, set the public hosts in `.env`
@@ -97,38 +60,165 @@ Private web UI for starting allowlisted deploy scripts on an AlmaLinux 9 target 
 
    ```bash
    DJANGO_DEBUG=false
-   DJANGO_ALLOWED_HOSTS=api.example.com,localhost,127.0.0.1,backend
-   CORS_ALLOWED_ORIGINS=https://example.com
-   CSRF_TRUSTED_ORIGINS=https://example.com,https://api.example.com
-   NEXT_PUBLIC_API_BASE_URL=https://api.example.com
+   DJANGO_ALLOWED_HOSTS=deploy-control-api.example.com,localhost,127.0.0.1,backend
+   CORS_ALLOWED_ORIGINS=https://deploy-control.example.com
+   CSRF_TRUSTED_ORIGINS=https://deploy-control.example.com,https://deploy-control-api.example.com
+   NEXT_PUBLIC_API_BASE_URL=https://deploy-control-api.example.com
    ```
 
    `NEXT_PUBLIC_API_BASE_URL` is compiled into the Next.js frontend image, so
    rebuild the frontend after changing it.
 
-8. Create the Django superuser:
+3. Create the Django superuser:
 
    ```bash
-   make createsuperuser
+   docker compose exec backend python manage.py createsuperuser
    ```
 
-9. Seed the allowlisted scripts:
-
-   ```bash
-   make seed-scripts
-   ```
-
-10. Log into the frontend:
+4. Log into the frontend:
 
    Open [http://localhost:3000/login](http://localhost:3000/login) and use the Django superuser credentials.
 
-11. Start a deploy job:
+## Dashboard Setup
 
-   Go to `/dashboard`, choose an enabled script, and press Start deploy. The backend only starts scripts in the `ScriptDefinition` allowlist and passes only the script's `remote_key` to the target wrapper.
+### 1. Create A Target Server
 
-12. Watch live logs:
+Go to `/dashboard` as a staff user and fill in the Target servers form.
 
-   After a job starts, the frontend redirects to `/jobs/<id>`. The backend streams `tail -n +1 -F <log_file>` over SSH and sends each log line as Server-Sent Events.
+Example values:
+
+```text
+Slug: prod-api
+Name: Production API server
+Allowed script dir: /opt/scripts
+Log dir: /home/deployer/logs/deploy
+Enabled: checked
+```
+
+After creation, the dashboard shows an agent token once. Save it immediately.
+
+### 2. Install The Agent On The Target Server
+
+On the target server:
+
+```bash
+sudo useradd -m -s /bin/bash deployer || true
+sudo mkdir -p /opt/deploy-control-agent /opt/scripts /home/deployer/logs/deploy
+sudo chown -R deployer:deployer /opt/deploy-control-agent /opt/scripts /home/deployer/logs/deploy
+```
+
+Copy the agent file:
+
+```bash
+scp ops/target-agent/deploy_agent.py deployer@TARGET_SERVER_IP:/opt/deploy-control-agent/deploy_agent.py
+ssh deployer@TARGET_SERVER_IP 'chmod 750 /opt/deploy-control-agent/deploy_agent.py'
+```
+
+Run the agent:
+
+```bash
+DEPLOY_CONTROL_API_URL=https://deploy-control-api.example.com \
+DEPLOY_AGENT_TOKEN=PASTE_AGENT_TOKEN_HERE \
+DEPLOY_ALLOWED_SCRIPT_DIR=/opt/scripts \
+DEPLOY_LOG_DIR=/home/deployer/logs/deploy \
+python3 /opt/deploy-control-agent/deploy_agent.py
+```
+
+For production, run the agent with systemd or another process supervisor.
+
+Install a systemd unit:
+
+```bash
+sudo tee /etc/systemd/system/deploy-control-agent.service >/dev/null <<'UNIT'
+[Unit]
+Description=Deploy Control Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=deployer
+Group=deployer
+Environment=DEPLOY_CONTROL_API_URL=https://deploy-control-api.example.com
+Environment=DEPLOY_AGENT_TOKEN=PASTE_AGENT_TOKEN_HERE
+Environment=DEPLOY_ALLOWED_SCRIPT_DIR=/opt/scripts
+Environment=DEPLOY_LOG_DIR=/home/deployer/logs/deploy
+ExecStart=/usr/bin/python3 /opt/deploy-control-agent/deploy_agent.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
+sudo systemctl daemon-reload
+sudo systemctl enable --now deploy-control-agent
+sudo systemctl status deploy-control-agent
+```
+
+Back in the dashboard, press Check on the target. It should report the agent's last check-in time.
+
+### 3. Add Deploy Scripts On The Target Server
+
+Each deploy script must already exist under the target's Allowed script dir and must be executable.
+
+Example:
+
+```bash
+sudo tee /opt/scripts/deploy-coin-identifier.sh >/dev/null <<'SCRIPT'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+cd /opt/apps/coin-identifier-backend
+git pull --ff-only
+docker compose up -d --build
+SCRIPT
+
+sudo chmod 750 /opt/scripts/deploy-coin-identifier.sh
+sudo chown deployer:deployer /opt/scripts/deploy-coin-identifier.sh
+```
+
+### 4. Create Script Records In The Dashboard
+
+Example values:
+
+```text
+Target: Production API server
+Slug: coin-identifier
+Remote key: coin-identifier
+Label: Deploy Coin Identifier Backend
+Script path: /opt/scripts/deploy-coin-identifier.sh
+Description: Runs the backend deploy script on the selected target server.
+Enabled: checked
+```
+
+### 5. Start A Deploy Job
+
+Go to `/dashboard`, choose an enabled script, and press Start deploy. The job is queued in the control panel. The target agent picks it up, runs the script, and streams logs back.
+
+### 6. Watch Logs
+
+After a job starts, the frontend redirects to `/jobs/<id>`. The page shows:
+
+- Job status
+- Target server
+- Started by
+- Started time
+- Exit code
+- Live logs
+
+Use Stop to request cancellation. The agent polls for this request and terminates the running process.
+
+## Fresh Reset
+
+If you deployed an earlier fixed-target or SSH-based prototype and do not need its old job history, recreate the database volume before running the new setup:
+
+```bash
+docker compose down -v
+docker compose up -d --build
+docker compose exec backend python manage.py migrate
+docker compose exec backend python manage.py createsuperuser
+```
+
+This deletes the PostgreSQL data volume.
 
 ## Make Commands
 
@@ -139,14 +229,26 @@ make logs
 make migrate
 make createsuperuser
 make shell-backend
-make seed-scripts
 ```
 
 ## API
 
+User-facing API:
+
 - `POST /api/auth/token/`
 - `POST /api/auth/token/refresh/`
+- `GET /api/me/`
+- `GET /api/targets/`
+- `POST /api/targets/`
+- `GET /api/targets/<int:id>/`
+- `PATCH /api/targets/<int:id>/`
+- `DELETE /api/targets/<int:id>/`
+- `POST /api/targets/<int:id>/test-connection/`
 - `GET /api/scripts/`
+- `POST /api/scripts/`
+- `GET /api/scripts/<int:id>/`
+- `PATCH /api/scripts/<int:id>/`
+- `DELETE /api/scripts/<int:id>/`
 - `POST /api/jobs/start/`
 - `GET /api/jobs/`
 - `GET /api/jobs/<uuid:id>/`
@@ -154,63 +256,65 @@ make seed-scripts
 - `POST /api/jobs/<uuid:id>/refresh-status/`
 - `POST /api/jobs/<uuid:id>/stop/`
 
-All deployment endpoints require JWT authentication.
+Agent API:
+
+- `POST /api/agent/ping/`
+- `POST /api/agent/jobs/claim/`
+- `POST /api/agent/jobs/<uuid:id>/logs/`
+- `POST /api/agent/jobs/<uuid:id>/status/`
+- `POST /api/agent/jobs/<uuid:id>/control/`
+
+All user-facing deployment endpoints require JWT authentication. Agent endpoints require the target's bearer token.
 
 ## Security Notes
 
-- The web UI never accepts arbitrary shell commands.
-- The backend validates the requested `script_slug`, loads an enabled database allowlist record, validates the `remote_key`, and calls only `run-deploy-job.sh start <script_key>`.
-- The target wrapper also has a hardcoded whitelist:
-  - `coin-identifier` -> `/opt/apps/scripts/deploy-coin-identifier.sh`
-  - `hikoni` -> `/opt/apps/scripts/deploy-hikoni.sh`
-- The SSH private key is mounted read-only from `./secrets` and is not stored in the database.
-- Use known host verification in production.
+- The control panel does not need SSH access to target servers.
+- Customers do not upload existing SSH private keys.
+- Each target has its own agent token.
+- The agent connects outbound to the control panel.
+- Staff users can create target server and script records. Non-staff users can run enabled scripts only.
+- The backend validates the requested `script_slug`, target, `remote_key`, and absolute script path.
+- The agent rejects script paths outside `DEPLOY_ALLOWED_SCRIPT_DIR`.
+- The agent token is shown once when the target is created. Store it securely.
+- If an agent token is lost or exposed, disable that target and create a new target token.
+- Run deploy scripts with a low-privilege OS user such as `deployer`.
 
 ## Troubleshooting
 
-### SSH connection failures
+### Agent Does Not Check In
 
-Run this from VPS #2 or from the backend container:
-
-```bash
-ssh -i secrets/deploy_panel_key tuanle@TARGET_SERVER_IP '/opt/apps/scripts/run-deploy-job.sh status test'
-```
-
-An invalid test job id should return a JSON error, which confirms SSH can reach the wrapper. If SSH fails, check `TARGET_SSH_HOST`, `TARGET_SSH_USER`, key permissions, and `authorized_keys`.
-
-### Host key verification
-
-For production, create a known hosts file:
+Check the agent process:
 
 ```bash
-ssh-keyscan -H TARGET_SERVER_IP > secrets/known_hosts
+sudo systemctl status deploy-control-agent
+sudo journalctl -u deploy-control-agent -f
 ```
 
-Then set:
+Confirm these environment variables are set correctly:
 
 ```bash
-TARGET_SSH_KNOWN_HOSTS=/run/secrets/known_hosts
-SSH_AUTO_ADD_HOST_KEY=false
+DEPLOY_CONTROL_API_URL
+DEPLOY_AGENT_TOKEN
+DEPLOY_ALLOWED_SCRIPT_DIR
+DEPLOY_LOG_DIR
 ```
 
-### Permission problems
+### Script Is Not Picked Up
 
-Confirm the SSH user can execute the wrapper and deploy scripts:
+Confirm the script record is enabled and belongs to a target whose agent is connected. Also confirm the script path is under the target's Allowed script dir.
+
+### Permission Problems
+
+Confirm the agent user can execute the deploy script:
 
 ```bash
-ssh -i secrets/deploy_panel_key tuanle@TARGET_SERVER_IP '/opt/apps/scripts/run-deploy-job.sh start coin-identifier'
+sudo -u deployer /opt/scripts/deploy-coin-identifier.sh
 ```
 
-The command should return JSON with `job_id`, `log_file`, `pid_file`, and `status_file`.
+### Log Streaming Problems
 
-### Log streaming problems
+Confirm the agent can write to its log directory and that the browser is connected to `/api/jobs/<id>/logs/stream/`.
 
-Check that the log path returned by the wrapper is under `TARGET_REMOTE_LOG_DIR`, default `/home/tuanle/logs/deploy`. The backend rejects log paths outside that directory. Also confirm the SSH user can run:
-
-```bash
-tail -n +1 -F /home/tuanle/logs/deploy/<job>.log
-```
-
-### Duplicate deploys
+### Duplicate Deploys
 
 The backend returns HTTP 409 if the same script already has a queued or running job. Refresh the job status or stop the running job before starting another deploy for that script.

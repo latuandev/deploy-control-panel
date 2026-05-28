@@ -23,15 +23,6 @@ services:
       DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1,backend}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000}
       CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-${CORS_ALLOWED_ORIGINS:-http://localhost:3000}}
-      TARGET_SSH_HOST: ${TARGET_SSH_HOST:-}
-      TARGET_SSH_PORT: ${TARGET_SSH_PORT:-22}
-      TARGET_SSH_USER: ${TARGET_SSH_USER:-tuanle}
-      TARGET_SSH_KEY_PATH: ${TARGET_SSH_KEY_PATH:-/run/secrets/deploy_panel_key}
-      TARGET_SSH_KEY_PASSPHRASE: ${TARGET_SSH_KEY_PASSPHRASE:-}
-      TARGET_SSH_KNOWN_HOSTS: ${TARGET_SSH_KNOWN_HOSTS:-}
-      TARGET_REMOTE_RUNNER: ${TARGET_REMOTE_RUNNER:-/opt/apps/scripts/run-deploy-job.sh}
-      TARGET_REMOTE_LOG_DIR: ${TARGET_REMOTE_LOG_DIR:-/home/tuanle/logs/deploy}
-      SSH_AUTO_ADD_HOST_KEY: ${SSH_AUTO_ADD_HOST_KEY:-true}
     volumes:
       - ./secrets:/run/secrets:ro
     ports:

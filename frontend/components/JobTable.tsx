@@ -21,6 +21,7 @@ export function JobTable({ jobs }: { jobs: DeploymentJob[] }) {
           <thead className="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
             <tr>
               <th className="px-4 py-3">Script</th>
+              <th className="px-4 py-3">Target</th>
               <th className="px-4 py-3">Status</th>
               <th className="px-4 py-3">Started</th>
               <th className="px-4 py-3">Started by</th>
@@ -32,6 +33,9 @@ export function JobTable({ jobs }: { jobs: DeploymentJob[] }) {
               <tr key={job.id} className="hover:bg-zinc-50">
                 <td className="whitespace-nowrap px-4 py-3 font-medium text-zinc-900">
                   {job.script.label}
+                </td>
+                <td className="whitespace-nowrap px-4 py-3 text-zinc-600">
+                  {job.target.name}
                 </td>
                 <td className="whitespace-nowrap px-4 py-3">
                   <StatusBadge status={job.status} />
@@ -65,4 +69,3 @@ function formatDate(value: string): string {
     timeStyle: "short"
   }).format(new Date(value));
 }
-
