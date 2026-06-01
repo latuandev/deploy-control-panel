@@ -23,7 +23,9 @@ export default function JobDetailPage() {
   const [lines, setLines] = useState<LogEntry[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [stopping, setStopping] = useState(false);
-  const streamStarted = useRef(false);
+  const [logStreamNonce, setLogStreamNonce] = useState(0);
+  const streamController = useRef<AbortController | null>(null);
+  const currentJobId = job?.id;
 
   const loadJob = useCallback(async () => {
     setError(null);
@@ -48,12 +50,13 @@ export default function JobDetailPage() {
   }, [loadJob, router]);
 
   useEffect(() => {
-    if (!job || streamStarted.current) {
+    if (!currentJobId) {
       return;
     }
-    streamStarted.current = true;
-    const jobId = job.id;
     const controller = new AbortController();
+    streamController.current?.abort();
+    streamController.current = controller;
+    const jobId = currentJobId;
 
     async function startStream() {
       let accessToken = getAccessToken();
@@ -109,14 +112,23 @@ export default function JobDetailPage() {
     }
 
     void startStream();
-    return () => controller.abort();
-  }, [job, router]);
+    return () => {
+      controller.abort();
+      if (streamController.current === controller) {
+        streamController.current = null;
+      }
+    };
+  }, [currentJobId, logStreamNonce, router]);
 
   async function handleRefresh() {
     if (!job) {
       return;
     }
     try {
+      setError(null);
+      streamController.current?.abort();
+      setLines([]);
+      setLogStreamNonce((current) => current + 1);
       setJob(await refreshJobStatus(job.id));
     } catch (exc) {
       setError(exc instanceof Error ? exc.message : "Could not refresh status.");

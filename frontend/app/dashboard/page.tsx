@@ -2,7 +2,18 @@
 
 import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { FileCode, LogOut, Play, Plus, RefreshCw, Server, Wifi } from "lucide-react";
+import {
+  FileCode,
+  LogOut,
+  Pencil,
+  Play,
+  Plus,
+  RefreshCw,
+  Server,
+  Trash2,
+  Wifi,
+  X
+} from "lucide-react";
 import { JobTable } from "@/components/JobTable";
 import { StatusBadge } from "@/components/StatusBadge";
 import {
@@ -10,12 +21,16 @@ import {
   API_BASE_URL,
   createScript,
   createTarget,
+  deleteScript,
+  deleteTarget,
   getCurrentUser,
   listJobs,
   listScripts,
   listTargets,
   startJob,
-  testTargetConnection
+  testTargetConnection,
+  updateScript,
+  updateTarget
 } from "@/lib/api";
 import { clearTokens, getAccessToken } from "@/lib/auth";
 import type {
@@ -48,6 +63,28 @@ const defaultScriptForm = {
   enabled: true
 };
 
+function targetToForm(target: TargetServer): typeof defaultTargetForm {
+  return {
+    slug: target.slug,
+    name: target.name,
+    allowed_script_dir: target.allowed_script_dir,
+    log_dir: target.log_dir,
+    enabled: target.enabled
+  };
+}
+
+function scriptToForm(script: ScriptDefinition): typeof defaultScriptForm {
+  return {
+    target_server_id: String(script.target.id),
+    slug: script.slug,
+    label: script.label,
+    remote_key: script.remote_key,
+    remote_script_path: script.remote_script_path,
+    description: script.description,
+    enabled: script.enabled
+  };
+}
+
 export default function DashboardPage() {
   const router = useRouter();
   const [profile, setProfile] = useState<UserProfile | null>(null);
@@ -58,9 +95,13 @@ export default function DashboardPage() {
   const [startingSlug, setStartingSlug] = useState<string | null>(null);
   const [savingTarget, setSavingTarget] = useState(false);
   const [savingScript, setSavingScript] = useState(false);
+  const [deletingTargetId, setDeletingTargetId] = useState<number | null>(null);
+  const [deletingScriptId, setDeletingScriptId] = useState<number | null>(null);
   const [testingTargetId, setTestingTargetId] = useState<number | null>(null);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [createdTarget, setCreatedTarget] = useState<CreatedTargetServer | null>(null);
+  const [editingTargetId, setEditingTargetId] = useState<number | null>(null);
+  const [editingScriptId, setEditingScriptId] = useState<number | null>(null);
   const [targetForm, setTargetForm] = useState(defaultTargetForm);
   const [scriptForm, setScriptForm] = useState(defaultScriptForm);
   const [error, setError] = useState<string | null>(null);
@@ -71,6 +112,26 @@ export default function DashboardPage() {
         jobs
           .filter((job) => job.status === "queued" || job.status === "running")
           .map((job) => job.script.slug)
+      ),
+    [jobs]
+  );
+
+  const activeScriptIds = useMemo(
+    () =>
+      new Set(
+        jobs
+          .filter((job) => job.status === "queued" || job.status === "running")
+          .map((job) => job.script.id)
+      ),
+    [jobs]
+  );
+
+  const activeTargetIds = useMemo(
+    () =>
+      new Set(
+        jobs
+          .filter((job) => job.status === "queued" || job.status === "running")
+          .map((job) => job.target.id)
       ),
     [jobs]
   );
@@ -137,25 +198,49 @@ export default function DashboardPage() {
     }
   }
 
-  async function handleCreateTarget(event: FormEvent<HTMLFormElement>) {
+  async function handleSaveTarget(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSavingTarget(true);
     setError(null);
     setTestResult(null);
     setCreatedTarget(null);
     try {
-      const target = await createTarget(targetForm);
-      setCreatedTarget(target);
+      if (editingTargetId === null) {
+        const target = await createTarget(targetForm);
+        setCreatedTarget(target);
+      } else {
+        await updateTarget(editingTargetId, targetForm);
+        setEditingTargetId(null);
+      }
       setTargetForm(defaultTargetForm);
       await loadData();
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Could not create target server.");
+      setError(
+        exc instanceof Error
+          ? exc.message
+          : editingTargetId === null
+            ? "Could not create target server."
+            : "Could not update target server."
+      );
     } finally {
       setSavingTarget(false);
     }
   }
 
-  async function handleCreateScript(event: FormEvent<HTMLFormElement>) {
+  function handleEditTarget(target: TargetServer) {
+    setCreatedTarget(null);
+    setTestResult(null);
+    setError(null);
+    setEditingTargetId(target.id);
+    setTargetForm(targetToForm(target));
+  }
+
+  function handleCancelEditTarget() {
+    setEditingTargetId(null);
+    setTargetForm(defaultTargetForm);
+  }
+
+  async function handleSaveScript(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!scriptForm.target_server_id) {
       setError("Choose a target server for this script.");
@@ -165,19 +250,106 @@ export default function DashboardPage() {
     setSavingScript(true);
     setError(null);
     try {
-      await createScript({
+      const payload = {
         ...scriptForm,
         target_server_id: Number(scriptForm.target_server_id)
-      });
+      };
+      if (editingScriptId === null) {
+        await createScript(payload);
+      } else {
+        await updateScript(editingScriptId, payload);
+        setEditingScriptId(null);
+      }
       setScriptForm({
         ...defaultScriptForm,
         target_server_id: scriptForm.target_server_id
       });
       await loadData();
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Could not create script.");
+      setError(
+        exc instanceof Error
+          ? exc.message
+          : editingScriptId === null
+            ? "Could not create script."
+            : "Could not update script."
+      );
     } finally {
       setSavingScript(false);
+    }
+  }
+
+  function handleEditScript(script: ScriptDefinition) {
+    setError(null);
+    setTestResult(null);
+    setEditingScriptId(script.id);
+    setScriptForm(scriptToForm(script));
+  }
+
+  function handleCancelEditScript() {
+    setEditingScriptId(null);
+    setScriptForm(defaultScriptForm);
+  }
+
+  async function handleDeleteTarget(target: TargetServer) {
+    if (activeTargetIds.has(target.id)) {
+      setError("Stop or finish active jobs before deleting this target server.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete target "${target.name}"? This disables the target and keeps job history.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingTargetId(target.id);
+    setError(null);
+    setTestResult(null);
+    setCreatedTarget(null);
+    try {
+      await deleteTarget(target.id);
+      if (editingTargetId === target.id) {
+        setEditingTargetId(null);
+        setTargetForm(defaultTargetForm);
+      }
+      setTestResult(`Target ${target.name} was deleted.`);
+      await loadData();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Could not delete target server.");
+    } finally {
+      setDeletingTargetId(null);
+    }
+  }
+
+  async function handleDeleteScript(script: ScriptDefinition) {
+    if (activeScriptIds.has(script.id)) {
+      setError("Stop or finish active jobs before deleting this script.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Delete script "${script.label}"? This disables the script and keeps job history.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setDeletingScriptId(script.id);
+    setError(null);
+    setTestResult(null);
+    try {
+      await deleteScript(script.id);
+      if (editingScriptId === script.id) {
+        setEditingScriptId(null);
+        setScriptForm(defaultScriptForm);
+      }
+      setTestResult(`Script ${script.label} was deleted.`);
+      await loadData();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Could not delete script.");
+    } finally {
+      setDeletingScriptId(null);
     }
   }
 
@@ -283,9 +455,15 @@ export default function DashboardPage() {
             <TargetServerPanel
               form={targetForm}
               onChange={setTargetForm}
-              onSubmit={handleCreateTarget}
+              onSubmit={handleSaveTarget}
+              onEdit={handleEditTarget}
+              onDelete={handleDeleteTarget}
+              onCancelEdit={handleCancelEditTarget}
               onTest={handleTestTarget}
+              activeTargetIds={activeTargetIds}
               createdTarget={createdTarget}
+              deletingTargetId={deletingTargetId}
+              editingTargetId={editingTargetId}
               saving={savingTarget}
               targets={targets}
               testingTargetId={testingTargetId}
@@ -293,7 +471,13 @@ export default function DashboardPage() {
             <ScriptPanel
               form={scriptForm}
               onChange={setScriptForm}
-              onSubmit={handleCreateScript}
+              onSubmit={handleSaveScript}
+              onEdit={handleEditScript}
+              onDelete={handleDeleteScript}
+              onCancelEdit={handleCancelEditScript}
+              activeScriptIds={activeScriptIds}
+              deletingScriptId={deletingScriptId}
+              editingScriptId={editingScriptId}
               saving={savingScript}
               scripts={scripts}
               targets={targets}
@@ -311,18 +495,30 @@ export default function DashboardPage() {
 }
 
 function TargetServerPanel({
+  activeTargetIds,
   createdTarget,
+  deletingTargetId,
+  editingTargetId,
   form,
   onChange,
+  onCancelEdit,
+  onDelete,
+  onEdit,
   onSubmit,
   onTest,
   saving,
   targets,
   testingTargetId
 }: {
+  activeTargetIds: Set<number>;
   createdTarget: CreatedTargetServer | null;
+  deletingTargetId: number | null;
+  editingTargetId: number | null;
   form: typeof defaultTargetForm;
   onChange: (value: typeof defaultTargetForm) => void;
+  onCancelEdit: () => void;
+  onDelete: (target: TargetServer) => void;
+  onEdit: (target: TargetServer) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   onTest: (target: TargetServer) => void;
   saving: boolean;
@@ -335,34 +531,70 @@ function TargetServerPanel({
         <Server aria-hidden="true" size={18} />
         <h2 className="text-base font-semibold text-zinc-950">Target servers</h2>
       </div>
-      <div className="mb-4 overflow-hidden rounded border border-zinc-200 bg-white shadow-panel">
-        <table className="min-w-full divide-y divide-zinc-200 text-sm">
+      <div className="mb-4 overflow-x-auto rounded border border-zinc-200 bg-white shadow-panel">
+        <table className="min-w-[560px] divide-y divide-zinc-200 text-sm">
           <thead className="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
             <tr>
               <th className="px-3 py-2">Name</th>
               <th className="px-3 py-2">Agent</th>
-              <th className="px-3 py-2 text-right">Check</th>
+              <th className="px-3 py-2">Enabled</th>
+              <th className="px-3 py-2 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100">
             {targets.map((target) => (
-              <tr key={target.id}>
+              <tr className={!target.enabled ? "bg-zinc-50" : undefined} key={target.id}>
                 <td className="px-3 py-2 font-medium text-zinc-950">{target.name}</td>
                 <td className="px-3 py-2 text-zinc-600">
                   {target.last_seen_at
                     ? `Seen ${formatDate(target.last_seen_at)}`
                     : "Not connected"}
                 </td>
-                <td className="px-3 py-2 text-right">
-                  <button
-                    className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100"
-                    disabled={testingTargetId === target.id}
-                    onClick={() => onTest(target)}
-                    type="button"
-                  >
-                    <Wifi aria-hidden="true" size={14} />
-                    {testingTargetId === target.id ? "Checking" : "Check"}
-                  </button>
+                <td className="px-3 py-2 text-zinc-600">{target.enabled ? "Yes" : "No"}</td>
+                <td className="px-3 py-2">
+                  <div className="flex justify-end gap-2">
+                    <button
+                      className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100"
+                      disabled={testingTargetId === target.id}
+                      onClick={() => onTest(target)}
+                      type="button"
+                    >
+                      <Wifi aria-hidden="true" size={14} />
+                      {testingTargetId === target.id ? "Checking" : "Check"}
+                    </button>
+                    <button
+                      className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                      onClick={() => onEdit(target)}
+                      type="button"
+                    >
+                      <Pencil aria-hidden="true" size={14} />
+                      {editingTargetId === target.id ? "Editing" : "Edit"}
+                    </button>
+                    <button
+                      className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-rose-200 bg-white px-2 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-400"
+                      disabled={
+                        !target.enabled ||
+                        activeTargetIds.has(target.id) ||
+                        deletingTargetId === target.id
+                      }
+                      onClick={() => onDelete(target)}
+                      title={
+                        !target.enabled
+                          ? "This target has already been deleted."
+                          : activeTargetIds.has(target.id)
+                          ? "Stop or finish active jobs before deleting this target."
+                          : undefined
+                      }
+                      type="button"
+                    >
+                      <Trash2 aria-hidden="true" size={14} />
+                      {!target.enabled
+                        ? "Deleted"
+                        : deletingTargetId === target.id
+                          ? "Deleting"
+                          : "Delete"}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -390,6 +622,21 @@ python3 /opt/deploy-control-agent/deploy_agent.py`}
         className="grid gap-3 rounded border border-zinc-200 bg-white p-4 shadow-panel"
         onSubmit={onSubmit}
       >
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm font-semibold text-zinc-950">
+            {editingTargetId === null ? "Add target" : "Edit target"}
+          </div>
+          {editingTargetId !== null ? (
+            <button
+              className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+              onClick={onCancelEdit}
+              type="button"
+            >
+              <X aria-hidden="true" size={14} />
+              Cancel
+            </button>
+          ) : null}
+        </div>
         <div className="grid gap-3 md:grid-cols-2">
           <Field label="Slug">
             <input
@@ -445,8 +692,12 @@ python3 /opt/deploy-control-agent/deploy_agent.py`}
             disabled={saving}
             type="submit"
           >
-            <Plus aria-hidden="true" size={16} />
-            {saving ? "Saving" : "Add target"}
+            {editingTargetId === null ? (
+              <Plus aria-hidden="true" size={16} />
+            ) : (
+              <Pencil aria-hidden="true" size={16} />
+            )}
+            {saving ? "Saving" : editingTargetId === null ? "Add target" : "Save changes"}
           </button>
         </div>
       </form>
@@ -455,15 +706,27 @@ python3 /opt/deploy-control-agent/deploy_agent.py`}
 }
 
 function ScriptPanel({
+  activeScriptIds,
+  deletingScriptId,
+  editingScriptId,
   form,
   onChange,
+  onCancelEdit,
+  onDelete,
+  onEdit,
   onSubmit,
   saving,
   scripts,
   targets
 }: {
+  activeScriptIds: Set<number>;
+  deletingScriptId: number | null;
+  editingScriptId: number | null;
   form: typeof defaultScriptForm;
   onChange: (value: typeof defaultScriptForm) => void;
+  onCancelEdit: () => void;
+  onDelete: (script: ScriptDefinition) => void;
+  onEdit: (script: ScriptDefinition) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   saving: boolean;
   scripts: ScriptDefinition[];
@@ -475,21 +738,58 @@ function ScriptPanel({
         <FileCode aria-hidden="true" size={18} />
         <h2 className="text-base font-semibold text-zinc-950">Scripts</h2>
       </div>
-      <div className="mb-4 overflow-hidden rounded border border-zinc-200 bg-white shadow-panel">
-        <table className="min-w-full divide-y divide-zinc-200 text-sm">
+      <div className="mb-4 overflow-x-auto rounded border border-zinc-200 bg-white shadow-panel">
+        <table className="min-w-[560px] divide-y divide-zinc-200 text-sm">
           <thead className="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
             <tr>
               <th className="px-3 py-2">Script</th>
               <th className="px-3 py-2">Target</th>
               <th className="px-3 py-2">Enabled</th>
+              <th className="px-3 py-2 text-right">Actions</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-zinc-100">
             {scripts.map((script) => (
-              <tr key={script.id}>
+              <tr className={!script.enabled ? "bg-zinc-50" : undefined} key={script.id}>
                 <td className="px-3 py-2 font-medium text-zinc-950">{script.label}</td>
                 <td className="px-3 py-2 text-zinc-600">{script.target.name}</td>
                 <td className="px-3 py-2 text-zinc-600">{script.enabled ? "Yes" : "No"}</td>
+                <td className="px-3 py-2 text-right">
+                  <div className="flex justify-end gap-2">
+                    <button
+                      className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                      onClick={() => onEdit(script)}
+                      type="button"
+                    >
+                      <Pencil aria-hidden="true" size={14} />
+                      {editingScriptId === script.id ? "Editing" : "Edit"}
+                    </button>
+                    <button
+                      className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-rose-200 bg-white px-2 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-400"
+                      disabled={
+                        !script.enabled ||
+                        activeScriptIds.has(script.id) ||
+                        deletingScriptId === script.id
+                      }
+                      onClick={() => onDelete(script)}
+                      title={
+                        !script.enabled
+                          ? "This script has already been deleted."
+                          : activeScriptIds.has(script.id)
+                          ? "Stop or finish active jobs before deleting this script."
+                          : undefined
+                      }
+                      type="button"
+                    >
+                      <Trash2 aria-hidden="true" size={14} />
+                      {!script.enabled
+                        ? "Deleted"
+                        : deletingScriptId === script.id
+                          ? "Deleting"
+                          : "Delete"}
+                    </button>
+                  </div>
+                </td>
               </tr>
             ))}
           </tbody>
@@ -500,6 +800,21 @@ function ScriptPanel({
         className="grid gap-3 rounded border border-zinc-200 bg-white p-4 shadow-panel"
         onSubmit={onSubmit}
       >
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-sm font-semibold text-zinc-950">
+            {editingScriptId === null ? "Add script" : "Edit script"}
+          </div>
+          {editingScriptId !== null ? (
+            <button
+              className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+              onClick={onCancelEdit}
+              type="button"
+            >
+              <X aria-hidden="true" size={14} />
+              Cancel
+            </button>
+          ) : null}
+        </div>
         <Field label="Target">
           <select
             className={inputClass}
@@ -587,8 +902,12 @@ function ScriptPanel({
             disabled={saving}
             type="submit"
           >
-            <Plus aria-hidden="true" size={16} />
-            {saving ? "Saving" : "Add script"}
+            {editingScriptId === null ? (
+              <Plus aria-hidden="true" size={16} />
+            ) : (
+              <Pencil aria-hidden="true" size={16} />
+            )}
+            {saving ? "Saving" : editingScriptId === null ? "Add script" : "Save changes"}
           </button>
         </div>
       </form>

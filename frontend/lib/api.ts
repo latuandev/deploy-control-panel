@@ -47,6 +47,22 @@ export async function createTarget(payload: TargetServerPayload): Promise<Create
   });
 }
 
+export async function updateTarget(
+  id: number,
+  payload: TargetServerPayload
+): Promise<TargetServer> {
+  return apiFetch<TargetServer>(`/api/targets/${id}/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteTarget(id: number): Promise<TargetServer> {
+  return apiFetch<TargetServer>(`/api/targets/${id}/`, {
+    method: "DELETE"
+  });
+}
+
 export async function testTargetConnection(id: number): Promise<{ detail: string }> {
   return apiFetch<{ detail: string }>(`/api/targets/${id}/test-connection/`, {
     method: "POST"
@@ -64,6 +80,22 @@ export async function createScript(
   return apiFetch<ScriptDefinition>("/api/scripts/", {
     method: "POST",
     body: JSON.stringify(payload)
+  });
+}
+
+export async function updateScript(
+  id: number,
+  payload: ScriptDefinitionPayload
+): Promise<ScriptDefinition> {
+  return apiFetch<ScriptDefinition>(`/api/scripts/${id}/`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteScript(id: number): Promise<ScriptDefinition> {
+  return apiFetch<ScriptDefinition>(`/api/scripts/${id}/`, {
+    method: "DELETE"
   });
 }
 
