@@ -39,6 +39,7 @@ TERMINAL_STATUSES = {
     DeploymentJob.Status.STOPPED,
 }
 VALID_AGENT_STATUSES = {choice.value for choice in DeploymentJob.Status}
+LOG_STREAM_BATCH_SIZE = 200
 
 
 def staff_required(request):
@@ -159,9 +160,14 @@ class TargetServerDetailView(APIView):
         forbidden = staff_required(request)
         if forbidden is not None:
             return forbidden
-        target = get_object_or_404(TargetServer, id=id)
-        target.enabled = False
-        target.save(update_fields=["enabled", "updated_at"])
+        with transaction.atomic():
+            target = get_object_or_404(TargetServer.objects.select_for_update(), id=id)
+            target.enabled = False
+            target.save(update_fields=["enabled", "updated_at"])
+            target.scripts.filter(enabled=True).update(
+                enabled=False,
+                updated_at=timezone.now(),
+            )
         return Response(TargetServerSerializer(target).data)
 
 
@@ -446,7 +452,7 @@ class AgentJobLogsView(APIView):
                 {"detail": "lines must be a list."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        lines = [str(line).rstrip("\r\n") for line in lines[:500]]
+        lines = [str(line).rstrip("\r\n") for line in lines]
         if not lines:
             return Response({"detail": "ok", "stored": 0})
 
@@ -525,7 +531,7 @@ def stream_sse_events(job_id):
                 DeploymentJobLogLine.objects.filter(
                     job=job,
                     sequence__gt=last_sequence,
-                ).order_by("sequence")[:200]
+                ).order_by("sequence")[:LOG_STREAM_BATCH_SIZE]
             )
             for line in lines:
                 last_sequence = line.sequence
@@ -536,7 +542,7 @@ def stream_sse_events(job_id):
                     }
                 )
 
-            if job.status in TERMINAL_STATUSES:
+            if job.status in TERMINAL_STATUSES and len(lines) < LOG_STREAM_BATCH_SIZE:
                 yield sse_message(
                     {
                         "status": job.status,
@@ -545,7 +551,8 @@ def stream_sse_events(job_id):
                     event="status",
                 )
                 break
-            time.sleep(1)
+            if not lines:
+                time.sleep(1)
     except (DeploymentJob.DoesNotExist, OperationalError) as exc:
         logger.warning("SSE stream failed", exc_info=True)
         yield sse_message({"detail": str(exc)}, event="error")
