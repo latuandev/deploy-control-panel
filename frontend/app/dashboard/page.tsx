@@ -375,7 +375,7 @@ export default function DashboardPage() {
   return (
     <main className="min-h-screen">
       <header className="border-b border-zinc-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
+        <div className="flex w-full items-center justify-between px-4 py-4 md:px-10 xl:px-20">
           <div>
             <h1 className="text-xl font-semibold text-zinc-950">Deploy Control Panel</h1>
             <p className="text-sm text-zinc-600">Private deploy jobs for target servers.</p>
@@ -399,7 +399,7 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-6xl px-4 py-6">
+      <div className="w-full px-4 py-6 md:px-10 xl:px-20">
         {error ? (
           <div className="mb-4 rounded border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
             {error}
@@ -417,7 +417,7 @@ export default function DashboardPage() {
             <h2 className="text-base font-semibold text-zinc-950">Available scripts</h2>
             {loading ? <span className="text-sm text-zinc-500">Loading...</span> : null}
           </div>
-          <div className="grid gap-4 md:grid-cols-2">
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {availableScripts.map((script) => {
               const isActive = activeScriptSlugs.has(script.slug);
               return (
@@ -532,7 +532,7 @@ function TargetServerPanel({
         <h2 className="text-base font-semibold text-zinc-950">Target servers</h2>
       </div>
       <div className="mb-4 overflow-x-auto rounded border border-zinc-200 bg-white shadow-panel">
-        <table className="min-w-[560px] divide-y divide-zinc-200 text-sm">
+        <table className="w-full min-w-[640px] divide-y divide-zinc-200 text-sm">
           <thead className="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
             <tr>
               <th className="px-3 py-2">Name</th>
@@ -739,7 +739,7 @@ function ScriptPanel({
         <h2 className="text-base font-semibold text-zinc-950">Scripts</h2>
       </div>
       <div className="mb-4 overflow-x-auto rounded border border-zinc-200 bg-white shadow-panel">
-        <table className="min-w-[560px] divide-y divide-zinc-200 text-sm">
+        <table className="w-full min-w-[640px] divide-y divide-zinc-200 text-sm">
           <thead className="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
             <tr>
               <th className="px-3 py-2">Script</th>

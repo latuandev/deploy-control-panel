@@ -153,7 +153,7 @@ export default function JobDetailPage() {
   return (
     <main className="min-h-screen">
       <header className="border-b border-zinc-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4">
+        <div className="flex w-full items-center justify-between px-4 py-4 md:px-10 xl:px-20">
           <div>
             <Link
               className="focus-ring mb-2 inline-flex items-center gap-1 rounded px-1 py-1 text-sm font-medium text-zinc-600 hover:text-zinc-950"
@@ -188,7 +188,7 @@ export default function JobDetailPage() {
         </div>
       </header>
 
-      <div className="mx-auto max-w-6xl px-4 py-6">
+      <div className="w-full px-4 py-6 md:px-10 xl:px-20">
         {error ? (
           <div className="mb-4 rounded border border-rose-200 bg-rose-50 px-4 py-3 text-sm text-rose-700">
             {error}
