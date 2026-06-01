@@ -451,7 +451,7 @@ export default function DashboardPage() {
         </section>
 
         {profile?.is_staff ? (
-          <section className="mb-8 grid gap-6 lg:grid-cols-2">
+          <section className="mb-8 grid min-w-0 gap-6 lg:grid-cols-2">
             <TargetServerPanel
               form={targetForm}
               onChange={setTargetForm}
@@ -526,80 +526,82 @@ function TargetServerPanel({
   testingTargetId: number | null;
 }) {
   return (
-    <div>
+    <div className="min-w-0">
       <div className="mb-3 flex items-center gap-2">
         <Server aria-hidden="true" size={18} />
         <h2 className="text-base font-semibold text-zinc-950">Target servers</h2>
       </div>
-      <div className="mb-4 overflow-x-auto rounded border border-zinc-200 bg-white shadow-panel">
-        <table className="w-full min-w-[640px] divide-y divide-zinc-200 text-sm">
-          <thead className="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-            <tr>
-              <th className="px-3 py-2">Name</th>
-              <th className="px-3 py-2">Agent</th>
-              <th className="px-3 py-2">Enabled</th>
-              <th className="px-3 py-2 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-100">
-            {targets.map((target) => (
-              <tr className={!target.enabled ? "bg-zinc-50" : undefined} key={target.id}>
-                <td className="px-3 py-2 font-medium text-zinc-950">{target.name}</td>
-                <td className="px-3 py-2 text-zinc-600">
-                  {target.last_seen_at
-                    ? `Seen ${formatDate(target.last_seen_at)}`
-                    : "Not connected"}
-                </td>
-                <td className="px-3 py-2 text-zinc-600">{target.enabled ? "Yes" : "No"}</td>
-                <td className="px-3 py-2">
-                  <div className="flex justify-end gap-2">
-                    <button
-                      className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100"
-                      disabled={testingTargetId === target.id}
-                      onClick={() => onTest(target)}
-                      type="button"
-                    >
-                      <Wifi aria-hidden="true" size={14} />
-                      {testingTargetId === target.id ? "Checking" : "Check"}
-                    </button>
-                    <button
-                      className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
-                      onClick={() => onEdit(target)}
-                      type="button"
-                    >
-                      <Pencil aria-hidden="true" size={14} />
-                      {editingTargetId === target.id ? "Editing" : "Edit"}
-                    </button>
-                    <button
-                      className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-rose-200 bg-white px-2 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-400"
-                      disabled={
-                        !target.enabled ||
-                        activeTargetIds.has(target.id) ||
-                        deletingTargetId === target.id
-                      }
-                      onClick={() => onDelete(target)}
-                      title={
-                        !target.enabled
-                          ? "This target has already been deleted."
-                          : activeTargetIds.has(target.id)
-                          ? "Stop or finish active jobs before deleting this target."
-                          : undefined
-                      }
-                      type="button"
-                    >
-                      <Trash2 aria-hidden="true" size={14} />
-                      {!target.enabled
-                        ? "Deleted"
-                        : deletingTargetId === target.id
-                          ? "Deleting"
-                          : "Delete"}
-                    </button>
-                  </div>
-                </td>
+      <div className="mb-4 overflow-hidden rounded border border-zinc-200 bg-white shadow-panel">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] divide-y divide-zinc-200 text-sm">
+            <thead className="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              <tr>
+                <th className="px-3 py-2">Name</th>
+                <th className="px-3 py-2">Agent</th>
+                <th className="px-3 py-2">Enabled</th>
+                <th className="px-3 py-2 text-right">Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {targets.map((target) => (
+                <tr className={!target.enabled ? "bg-zinc-50" : undefined} key={target.id}>
+                  <td className="px-3 py-2 font-medium text-zinc-950">{target.name}</td>
+                  <td className="px-3 py-2 text-zinc-600">
+                    {target.last_seen_at
+                      ? `Seen ${formatDate(target.last_seen_at)}`
+                      : "Not connected"}
+                  </td>
+                  <td className="px-3 py-2 text-zinc-600">{target.enabled ? "Yes" : "No"}</td>
+                  <td className="px-3 py-2">
+                    <div className="flex justify-end gap-2">
+                      <button
+                        className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:cursor-not-allowed disabled:bg-zinc-100"
+                        disabled={testingTargetId === target.id}
+                        onClick={() => onTest(target)}
+                        type="button"
+                      >
+                        <Wifi aria-hidden="true" size={14} />
+                        {testingTargetId === target.id ? "Checking" : "Check"}
+                      </button>
+                      <button
+                        className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                        onClick={() => onEdit(target)}
+                        type="button"
+                      >
+                        <Pencil aria-hidden="true" size={14} />
+                        {editingTargetId === target.id ? "Editing" : "Edit"}
+                      </button>
+                      <button
+                        className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-rose-200 bg-white px-2 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-400"
+                        disabled={
+                          !target.enabled ||
+                          activeTargetIds.has(target.id) ||
+                          deletingTargetId === target.id
+                        }
+                        onClick={() => onDelete(target)}
+                        title={
+                          !target.enabled
+                            ? "This target has already been deleted."
+                            : activeTargetIds.has(target.id)
+                            ? "Stop or finish active jobs before deleting this target."
+                            : undefined
+                        }
+                        type="button"
+                      >
+                        <Trash2 aria-hidden="true" size={14} />
+                        {!target.enabled
+                          ? "Deleted"
+                          : deletingTargetId === target.id
+                            ? "Deleting"
+                            : "Delete"}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       {createdTarget ? (
@@ -733,67 +735,69 @@ function ScriptPanel({
   targets: TargetServer[];
 }) {
   return (
-    <div>
+    <div className="min-w-0">
       <div className="mb-3 flex items-center gap-2">
         <FileCode aria-hidden="true" size={18} />
         <h2 className="text-base font-semibold text-zinc-950">Scripts</h2>
       </div>
-      <div className="mb-4 overflow-x-auto rounded border border-zinc-200 bg-white shadow-panel">
-        <table className="w-full min-w-[640px] divide-y divide-zinc-200 text-sm">
-          <thead className="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
-            <tr>
-              <th className="px-3 py-2">Script</th>
-              <th className="px-3 py-2">Target</th>
-              <th className="px-3 py-2">Enabled</th>
-              <th className="px-3 py-2 text-right">Actions</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-zinc-100">
-            {scripts.map((script) => (
-              <tr className={!script.enabled ? "bg-zinc-50" : undefined} key={script.id}>
-                <td className="px-3 py-2 font-medium text-zinc-950">{script.label}</td>
-                <td className="px-3 py-2 text-zinc-600">{script.target.name}</td>
-                <td className="px-3 py-2 text-zinc-600">{script.enabled ? "Yes" : "No"}</td>
-                <td className="px-3 py-2 text-right">
-                  <div className="flex justify-end gap-2">
-                    <button
-                      className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
-                      onClick={() => onEdit(script)}
-                      type="button"
-                    >
-                      <Pencil aria-hidden="true" size={14} />
-                      {editingScriptId === script.id ? "Editing" : "Edit"}
-                    </button>
-                    <button
-                      className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-rose-200 bg-white px-2 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-400"
-                      disabled={
-                        !script.enabled ||
-                        activeScriptIds.has(script.id) ||
-                        deletingScriptId === script.id
-                      }
-                      onClick={() => onDelete(script)}
-                      title={
-                        !script.enabled
-                          ? "This script has already been deleted."
-                          : activeScriptIds.has(script.id)
-                          ? "Stop or finish active jobs before deleting this script."
-                          : undefined
-                      }
-                      type="button"
-                    >
-                      <Trash2 aria-hidden="true" size={14} />
-                      {!script.enabled
-                        ? "Deleted"
-                        : deletingScriptId === script.id
-                          ? "Deleting"
-                          : "Delete"}
-                    </button>
-                  </div>
-                </td>
+      <div className="mb-4 overflow-hidden rounded border border-zinc-200 bg-white shadow-panel">
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[640px] divide-y divide-zinc-200 text-sm">
+            <thead className="bg-zinc-50 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">
+              <tr>
+                <th className="px-3 py-2">Script</th>
+                <th className="px-3 py-2">Target</th>
+                <th className="px-3 py-2">Enabled</th>
+                <th className="px-3 py-2 text-right">Actions</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-zinc-100">
+              {scripts.map((script) => (
+                <tr className={!script.enabled ? "bg-zinc-50" : undefined} key={script.id}>
+                  <td className="px-3 py-2 font-medium text-zinc-950">{script.label}</td>
+                  <td className="px-3 py-2 text-zinc-600">{script.target.name}</td>
+                  <td className="px-3 py-2 text-zinc-600">{script.enabled ? "Yes" : "No"}</td>
+                  <td className="px-3 py-2 text-right">
+                    <div className="flex justify-end gap-2">
+                      <button
+                        className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-zinc-300 bg-white px-2 text-xs font-medium text-zinc-700 hover:bg-zinc-50"
+                        onClick={() => onEdit(script)}
+                        type="button"
+                      >
+                        <Pencil aria-hidden="true" size={14} />
+                        {editingScriptId === script.id ? "Editing" : "Edit"}
+                      </button>
+                      <button
+                        className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-rose-200 bg-white px-2 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-400"
+                        disabled={
+                          !script.enabled ||
+                          activeScriptIds.has(script.id) ||
+                          deletingScriptId === script.id
+                        }
+                        onClick={() => onDelete(script)}
+                        title={
+                          !script.enabled
+                            ? "This script has already been deleted."
+                            : activeScriptIds.has(script.id)
+                            ? "Stop or finish active jobs before deleting this script."
+                            : undefined
+                        }
+                        type="button"
+                      >
+                        <Trash2 aria-hidden="true" size={14} />
+                        {!script.enabled
+                          ? "Deleted"
+                          : deletingScriptId === script.id
+                            ? "Deleting"
+                            : "Delete"}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
 
       <form
