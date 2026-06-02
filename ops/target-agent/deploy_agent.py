@@ -28,6 +28,9 @@ ALLOWED_SCRIPT_DIR = Path(env("DEPLOY_ALLOWED_SCRIPT_DIR", "/opt/scripts")).reso
 LOG_DIR = Path(env("DEPLOY_LOG_DIR", "/home/deployer/logs/deploy")).resolve()
 POLL_SECONDS = float(env("DEPLOY_AGENT_POLL_SECONDS", "2"))
 CONTROL_SECONDS = float(env("DEPLOY_AGENT_CONTROL_SECONDS", "2"))
+LOG_RETENTION_DAYS = float(env("DEPLOY_LOG_RETENTION_DAYS", "30"))
+LOG_CLEANUP_SECONDS = float(env("DEPLOY_LOG_CLEANUP_SECONDS", "3600"))
+SECONDS_PER_DAY = 24 * 60 * 60
 
 
 class AgentError(Exception):
@@ -140,6 +143,28 @@ def terminate_process(process: subprocess.Popen[str]) -> int:
         return process.wait(timeout=10)
 
 
+def cleanup_old_logs(now: float | None = None) -> int:
+    if LOG_RETENTION_DAYS <= 0:
+        return 0
+
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    cutoff = (now if now is not None else time.time()) - (
+        LOG_RETENTION_DAYS * SECONDS_PER_DAY
+    )
+    deleted = 0
+    for path in LOG_DIR.glob("*.log"):
+        try:
+            if path.is_symlink() or not path.is_file():
+                continue
+            if path.stat().st_mtime >= cutoff:
+                continue
+            path.unlink()
+            deleted += 1
+        except OSError as exc:
+            warn(f"Could not clean up old log {path}: {exc}")
+    return deleted
+
+
 def run_job(job: dict[str, Any]) -> None:
     job_id = job["id"]
     script_key = job["script_key"]
@@ -238,8 +263,13 @@ def main() -> int:
     require_config()
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     LOG_DIR.mkdir(parents=True, exist_ok=True)
+    next_log_cleanup = 0.0
     while True:
         try:
+            now = time.monotonic()
+            if LOG_CLEANUP_SECONDS > 0 and now >= next_log_cleanup:
+                cleanup_old_logs()
+                next_log_cleanup = now + LOG_CLEANUP_SECONDS
             api_request("/api/agent/ping/", {})
             job = claim_job()
             if job:

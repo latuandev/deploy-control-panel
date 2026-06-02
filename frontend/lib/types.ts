@@ -26,6 +26,16 @@ export interface CreatedTargetServer extends TargetServer {
   agent_token: string;
 }
 
+export interface AgentSetupGuide {
+  agent_filename: string;
+  agent_source: string;
+  agent_install_dir: string;
+  agent_path: string;
+  log_retention_days: number;
+  log_cleanup_seconds: number;
+  targets: TargetServer[];
+}
+
 export interface ScriptDefinition {
   id: number;
   target: TargetServerSummary;

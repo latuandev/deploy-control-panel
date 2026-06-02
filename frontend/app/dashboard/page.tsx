@@ -1,8 +1,10 @@
 "use client";
 
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  Ban,
   FileCode,
   LogOut,
   Pencil,
@@ -10,6 +12,7 @@ import {
   Plus,
   RefreshCw,
   Server,
+  Terminal,
   Trash2,
   Wifi,
   X
@@ -21,9 +24,11 @@ import {
   API_BASE_URL,
   createScript,
   createTarget,
-  deleteScript,
-  deleteTarget,
+  disableScript,
+  disableTarget,
   getCurrentUser,
+  hardDeleteScript,
+  hardDeleteTarget,
   listJobs,
   listScripts,
   listTargets,
@@ -63,6 +68,8 @@ const defaultScriptForm = {
   enabled: true
 };
 
+const JOB_PAGE_SIZE = 20;
+
 function targetToForm(target: TargetServer): typeof defaultTargetForm {
   return {
     slug: target.slug,
@@ -91,10 +98,15 @@ export default function DashboardPage() {
   const [targets, setTargets] = useState<TargetServer[]>([]);
   const [scripts, setScripts] = useState<ScriptDefinition[]>([]);
   const [jobs, setJobs] = useState<DeploymentJob[]>([]);
+  const [jobsNextOffset, setJobsNextOffset] = useState(JOB_PAGE_SIZE);
+  const [jobsHasMore, setJobsHasMore] = useState(false);
+  const [loadingMoreJobs, setLoadingMoreJobs] = useState(false);
   const [loading, setLoading] = useState(true);
   const [startingSlug, setStartingSlug] = useState<string | null>(null);
   const [savingTarget, setSavingTarget] = useState(false);
   const [savingScript, setSavingScript] = useState(false);
+  const [disablingTargetId, setDisablingTargetId] = useState<number | null>(null);
+  const [disablingScriptId, setDisablingScriptId] = useState<number | null>(null);
   const [deletingTargetId, setDeletingTargetId] = useState<number | null>(null);
   const [deletingScriptId, setDeletingScriptId] = useState<number | null>(null);
   const [testingTargetId, setTestingTargetId] = useState<number | null>(null);
@@ -105,6 +117,10 @@ export default function DashboardPage() {
   const [targetForm, setTargetForm] = useState(defaultTargetForm);
   const [scriptForm, setScriptForm] = useState(defaultScriptForm);
   const [error, setError] = useState<string | null>(null);
+  const jobsLoadMoreRef = useRef<HTMLDivElement | null>(null);
+  const loadedJobLimitRef = useRef(JOB_PAGE_SIZE);
+  const loadingMoreJobsRef = useRef(false);
+  const jobsHasMoreRef = useRef(false);
 
   const activeScriptSlugs = useMemo(
     () =>
@@ -145,14 +161,19 @@ export default function DashboardPage() {
     setError(null);
     try {
       const profileData = await getCurrentUser();
+      const jobLimit = Math.max(loadedJobLimitRef.current, JOB_PAGE_SIZE);
       const [scriptData, jobData, targetData] = await Promise.all([
         listScripts(profileData.is_staff),
-        listJobs(),
+        listJobs({ limit: jobLimit, offset: 0 }),
         profileData.is_staff ? listTargets() : Promise.resolve([])
       ]);
       setProfile(profileData);
       setScripts(scriptData);
-      setJobs(jobData);
+      setJobs(jobData.results);
+      setJobsNextOffset(jobData.next_offset);
+      setJobsHasMore(jobData.has_more);
+      jobsHasMoreRef.current = jobData.has_more;
+      loadedJobLimitRef.current = Math.max(jobData.next_offset, JOB_PAGE_SIZE);
       setTargets(targetData);
       if (!scriptForm.target_server_id && targetData[0]) {
         setScriptForm((current) => ({
@@ -175,6 +196,43 @@ export default function DashboardPage() {
     }
   }, [router, scriptForm.target_server_id]);
 
+  const loadMoreJobs = useCallback(async () => {
+    if (loadingMoreJobsRef.current || !jobsHasMoreRef.current) {
+      return;
+    }
+
+    loadingMoreJobsRef.current = true;
+    setLoadingMoreJobs(true);
+    setError(null);
+    try {
+      const page = await listJobs({ limit: JOB_PAGE_SIZE, offset: jobsNextOffset });
+      setJobs((current) => {
+        const seenJobIds = new Set(current.map((job) => job.id));
+        const nextJobs = [...current];
+        for (const job of page.results) {
+          if (!seenJobIds.has(job.id)) {
+            nextJobs.push(job);
+          }
+        }
+        return nextJobs;
+      });
+      setJobsNextOffset(page.next_offset);
+      setJobsHasMore(page.has_more);
+      jobsHasMoreRef.current = page.has_more;
+      loadedJobLimitRef.current = Math.max(loadedJobLimitRef.current, page.next_offset);
+    } catch (exc) {
+      if (exc instanceof ApiError && exc.status === 401) {
+        clearTokens();
+        router.replace("/login");
+        return;
+      }
+      setError(exc instanceof Error ? exc.message : "Could not load more jobs.");
+    } finally {
+      loadingMoreJobsRef.current = false;
+      setLoadingMoreJobs(false);
+    }
+  }, [jobsNextOffset, router]);
+
   useEffect(() => {
     if (!getAccessToken()) {
       router.replace("/login");
@@ -184,6 +242,24 @@ export default function DashboardPage() {
     const interval = window.setInterval(() => void loadData(), 10000);
     return () => window.clearInterval(interval);
   }, [loadData, router]);
+
+  useEffect(() => {
+    const marker = jobsLoadMoreRef.current;
+    if (!marker || !jobsHasMore) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          void loadMoreJobs();
+        }
+      },
+      { rootMargin: "300px 0px" }
+    );
+    observer.observe(marker);
+    return () => observer.disconnect();
+  }, [jobsHasMore, loadMoreJobs]);
 
   async function handleStart(script: ScriptDefinition) {
     setError(null);
@@ -290,6 +366,38 @@ export default function DashboardPage() {
     setScriptForm(defaultScriptForm);
   }
 
+  async function handleDisableTarget(target: TargetServer) {
+    if (activeTargetIds.has(target.id)) {
+      setError("Stop or finish active jobs before disabling this target server.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Disable target "${target.name}"? This also disables linked scripts and keeps job history.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setDisablingTargetId(target.id);
+    setError(null);
+    setTestResult(null);
+    setCreatedTarget(null);
+    try {
+      await disableTarget(target.id);
+      if (editingTargetId === target.id) {
+        setEditingTargetId(null);
+        setTargetForm(defaultTargetForm);
+      }
+      setTestResult(`Target ${target.name} was disabled.`);
+      await loadData();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Could not disable target server.");
+    } finally {
+      setDisablingTargetId(null);
+    }
+  }
+
   async function handleDeleteTarget(target: TargetServer) {
     if (activeTargetIds.has(target.id)) {
       setError("Stop or finish active jobs before deleting this target server.");
@@ -297,7 +405,7 @@ export default function DashboardPage() {
     }
 
     const confirmed = window.confirm(
-      `Delete target "${target.name}"? This disables the target and keeps job history.`
+      `Permanently delete target "${target.name}"? This deletes linked scripts, deployment jobs, and log lines. This cannot be undone.`
     );
     if (!confirmed) {
       return;
@@ -308,17 +416,48 @@ export default function DashboardPage() {
     setTestResult(null);
     setCreatedTarget(null);
     try {
-      await deleteTarget(target.id);
+      await hardDeleteTarget(target.id);
       if (editingTargetId === target.id) {
         setEditingTargetId(null);
         setTargetForm(defaultTargetForm);
       }
-      setTestResult(`Target ${target.name} was deleted.`);
+      setTestResult(`Target ${target.name} was permanently deleted.`);
       await loadData();
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Could not delete target server.");
+      setError(exc instanceof Error ? exc.message : "Could not permanently delete target server.");
     } finally {
       setDeletingTargetId(null);
+    }
+  }
+
+  async function handleDisableScript(script: ScriptDefinition) {
+    if (activeScriptIds.has(script.id)) {
+      setError("Stop or finish active jobs before disabling this script.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `Disable script "${script.label}"? This keeps deployment job history.`
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setDisablingScriptId(script.id);
+    setError(null);
+    setTestResult(null);
+    try {
+      await disableScript(script.id);
+      if (editingScriptId === script.id) {
+        setEditingScriptId(null);
+        setScriptForm(defaultScriptForm);
+      }
+      setTestResult(`Script ${script.label} was disabled.`);
+      await loadData();
+    } catch (exc) {
+      setError(exc instanceof Error ? exc.message : "Could not disable script.");
+    } finally {
+      setDisablingScriptId(null);
     }
   }
 
@@ -329,7 +468,7 @@ export default function DashboardPage() {
     }
 
     const confirmed = window.confirm(
-      `Delete script "${script.label}"? This disables the script and keeps job history.`
+      `Permanently delete script "${script.label}"? This deletes related deployment jobs and log lines. This cannot be undone.`
     );
     if (!confirmed) {
       return;
@@ -339,15 +478,15 @@ export default function DashboardPage() {
     setError(null);
     setTestResult(null);
     try {
-      await deleteScript(script.id);
+      await hardDeleteScript(script.id);
       if (editingScriptId === script.id) {
         setEditingScriptId(null);
         setScriptForm(defaultScriptForm);
       }
-      setTestResult(`Script ${script.label} was deleted.`);
+      setTestResult(`Script ${script.label} was permanently deleted.`);
       await loadData();
     } catch (exc) {
-      setError(exc instanceof Error ? exc.message : "Could not delete script.");
+      setError(exc instanceof Error ? exc.message : "Could not permanently delete script.");
     } finally {
       setDeletingScriptId(null);
     }
@@ -375,12 +514,20 @@ export default function DashboardPage() {
   return (
     <main className="min-h-screen">
       <header className="border-b border-zinc-200 bg-white">
-        <div className="flex w-full items-center justify-between px-4 py-4 md:px-10 xl:px-20">
+        <div className="flex w-full flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-10 xl:px-20">
           <div>
             <h1 className="text-xl font-semibold text-zinc-950">Deploy Control Panel</h1>
             <p className="text-sm text-zinc-600">Private deploy jobs for target servers.</p>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            {profile?.is_staff ? (
+              <Link
+                className="focus-ring inline-flex h-9 items-center gap-2 rounded border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
+                href="/setup"
+              >
+                <Terminal aria-hidden="true" size={16} /> Setup
+              </Link>
+            ) : null}
             <button
               className="focus-ring inline-flex h-9 items-center gap-2 rounded border border-zinc-300 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50"
               onClick={() => void loadData()}
@@ -457,11 +604,13 @@ export default function DashboardPage() {
               onChange={setTargetForm}
               onSubmit={handleSaveTarget}
               onEdit={handleEditTarget}
+              onDisable={handleDisableTarget}
               onDelete={handleDeleteTarget}
               onCancelEdit={handleCancelEditTarget}
               onTest={handleTestTarget}
               activeTargetIds={activeTargetIds}
               createdTarget={createdTarget}
+              disablingTargetId={disablingTargetId}
               deletingTargetId={deletingTargetId}
               editingTargetId={editingTargetId}
               saving={savingTarget}
@@ -473,9 +622,11 @@ export default function DashboardPage() {
               onChange={setScriptForm}
               onSubmit={handleSaveScript}
               onEdit={handleEditScript}
+              onDisable={handleDisableScript}
               onDelete={handleDeleteScript}
               onCancelEdit={handleCancelEditScript}
               activeScriptIds={activeScriptIds}
+              disablingScriptId={disablingScriptId}
               deletingScriptId={deletingScriptId}
               editingScriptId={editingScriptId}
               saving={savingScript}
@@ -488,6 +639,18 @@ export default function DashboardPage() {
         <section>
           <h2 className="mb-3 text-base font-semibold text-zinc-950">Recent jobs</h2>
           <JobTable jobs={jobs} />
+          <div
+            className="flex h-10 items-center justify-center text-sm text-zinc-500"
+            ref={jobsLoadMoreRef}
+          >
+            {loadingMoreJobs
+              ? "Loading more jobs..."
+              : jobsHasMore
+                ? "Scroll to load more"
+                : jobs.length
+                  ? "All jobs loaded"
+                  : null}
+          </div>
         </section>
       </div>
     </main>
@@ -497,11 +660,13 @@ export default function DashboardPage() {
 function TargetServerPanel({
   activeTargetIds,
   createdTarget,
+  disablingTargetId,
   deletingTargetId,
   editingTargetId,
   form,
   onChange,
   onCancelEdit,
+  onDisable,
   onDelete,
   onEdit,
   onSubmit,
@@ -512,11 +677,13 @@ function TargetServerPanel({
 }: {
   activeTargetIds: Set<number>;
   createdTarget: CreatedTargetServer | null;
+  disablingTargetId: number | null;
   deletingTargetId: number | null;
   editingTargetId: number | null;
   form: typeof defaultTargetForm;
   onChange: (value: typeof defaultTargetForm) => void;
   onCancelEdit: () => void;
+  onDisable: (target: TargetServer) => void;
   onDelete: (target: TargetServer) => void;
   onEdit: (target: TargetServer) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -572,28 +739,42 @@ function TargetServerPanel({
                         {editingTargetId === target.id ? "Editing" : "Edit"}
                       </button>
                       <button
-                        className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-rose-200 bg-white px-2 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-400"
+                        className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-amber-200 bg-white px-2 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-400"
                         disabled={
                           !target.enabled ||
                           activeTargetIds.has(target.id) ||
-                          deletingTargetId === target.id
+                          disablingTargetId === target.id
                         }
-                        onClick={() => onDelete(target)}
+                        onClick={() => onDisable(target)}
                         title={
                           !target.enabled
-                            ? "This target has already been deleted."
+                            ? "This target has already been disabled."
                             : activeTargetIds.has(target.id)
-                            ? "Stop or finish active jobs before deleting this target."
+                            ? "Stop or finish active jobs before disabling this target."
+                            : undefined
+                        }
+                        type="button"
+                      >
+                        <Ban aria-hidden="true" size={14} />
+                        {!target.enabled
+                          ? "Disabled"
+                          : disablingTargetId === target.id
+                            ? "Disabling"
+                            : "Disable"}
+                      </button>
+                      <button
+                        className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-rose-200 bg-white px-2 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-400"
+                        disabled={activeTargetIds.has(target.id) || deletingTargetId === target.id}
+                        onClick={() => onDelete(target)}
+                        title={
+                          activeTargetIds.has(target.id)
+                            ? "Stop or finish active jobs before permanently deleting this target."
                             : undefined
                         }
                         type="button"
                       >
                         <Trash2 aria-hidden="true" size={14} />
-                        {!target.enabled
-                          ? "Deleted"
-                          : deletingTargetId === target.id
-                            ? "Deleting"
-                            : "Delete"}
+                        {deletingTargetId === target.id ? "Deleting" : "Delete"}
                       </button>
                     </div>
                   </td>
@@ -615,6 +796,7 @@ function TargetServerPanel({
 DEPLOY_AGENT_TOKEN=${createdTarget.agent_token} \\
 DEPLOY_ALLOWED_SCRIPT_DIR=${createdTarget.allowed_script_dir} \\
 DEPLOY_LOG_DIR=${createdTarget.log_dir} \\
+DEPLOY_LOG_RETENTION_DAYS=30 \\
 python3 /opt/deploy-control-agent/deploy_agent.py`}
           </pre>
         </div>
@@ -709,11 +891,13 @@ python3 /opt/deploy-control-agent/deploy_agent.py`}
 
 function ScriptPanel({
   activeScriptIds,
+  disablingScriptId,
   deletingScriptId,
   editingScriptId,
   form,
   onChange,
   onCancelEdit,
+  onDisable,
   onDelete,
   onEdit,
   onSubmit,
@@ -722,11 +906,13 @@ function ScriptPanel({
   targets
 }: {
   activeScriptIds: Set<number>;
+  disablingScriptId: number | null;
   deletingScriptId: number | null;
   editingScriptId: number | null;
   form: typeof defaultScriptForm;
   onChange: (value: typeof defaultScriptForm) => void;
   onCancelEdit: () => void;
+  onDisable: (script: ScriptDefinition) => void;
   onDelete: (script: ScriptDefinition) => void;
   onEdit: (script: ScriptDefinition) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
@@ -768,28 +954,42 @@ function ScriptPanel({
                         {editingScriptId === script.id ? "Editing" : "Edit"}
                       </button>
                       <button
-                        className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-rose-200 bg-white px-2 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-400"
+                        className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-amber-200 bg-white px-2 text-xs font-medium text-amber-700 hover:bg-amber-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-400"
                         disabled={
                           !script.enabled ||
                           activeScriptIds.has(script.id) ||
-                          deletingScriptId === script.id
+                          disablingScriptId === script.id
                         }
-                        onClick={() => onDelete(script)}
+                        onClick={() => onDisable(script)}
                         title={
                           !script.enabled
-                            ? "This script has already been deleted."
+                            ? "This script has already been disabled."
                             : activeScriptIds.has(script.id)
-                            ? "Stop or finish active jobs before deleting this script."
+                            ? "Stop or finish active jobs before disabling this script."
+                            : undefined
+                        }
+                        type="button"
+                      >
+                        <Ban aria-hidden="true" size={14} />
+                        {!script.enabled
+                          ? "Disabled"
+                          : disablingScriptId === script.id
+                            ? "Disabling"
+                            : "Disable"}
+                      </button>
+                      <button
+                        className="focus-ring inline-flex h-8 items-center gap-1 rounded border border-rose-200 bg-white px-2 text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:cursor-not-allowed disabled:border-zinc-200 disabled:bg-zinc-100 disabled:text-zinc-400"
+                        disabled={activeScriptIds.has(script.id) || deletingScriptId === script.id}
+                        onClick={() => onDelete(script)}
+                        title={
+                          activeScriptIds.has(script.id)
+                            ? "Stop or finish active jobs before permanently deleting this script."
                             : undefined
                         }
                         type="button"
                       >
                         <Trash2 aria-hidden="true" size={14} />
-                        {!script.enabled
-                          ? "Deleted"
-                          : deletingScriptId === script.id
-                            ? "Deleting"
-                            : "Delete"}
+                        {deletingScriptId === script.id ? "Deleting" : "Delete"}
                       </button>
                     </div>
                   </td>

@@ -1,5 +1,6 @@
 import { clearTokens, getAccessToken, getRefreshToken, storeAccessToken } from "./auth";
 import type {
+  AgentSetupGuide,
   DeploymentJob,
   CreatedTargetServer,
   ScriptDefinition,
@@ -36,6 +37,10 @@ export async function getCurrentUser(): Promise<UserProfile> {
   return apiFetch<UserProfile>("/api/me/");
 }
 
+export async function getAgentSetupGuide(): Promise<AgentSetupGuide> {
+  return apiFetch<AgentSetupGuide>("/api/setup/agent/");
+}
+
 export async function listTargets(): Promise<TargetServer[]> {
   return apiFetch<TargetServer[]>("/api/targets/");
 }
@@ -57,8 +62,14 @@ export async function updateTarget(
   });
 }
 
-export async function deleteTarget(id: number): Promise<TargetServer> {
+export async function disableTarget(id: number): Promise<TargetServer> {
   return apiFetch<TargetServer>(`/api/targets/${id}/`, {
+    method: "DELETE"
+  });
+}
+
+export async function hardDeleteTarget(id: number): Promise<{ detail: string }> {
+  return apiFetch<{ detail: string }>(`/api/targets/${id}/hard-delete/`, {
     method: "DELETE"
   });
 }
@@ -93,14 +104,37 @@ export async function updateScript(
   });
 }
 
-export async function deleteScript(id: number): Promise<ScriptDefinition> {
+export async function disableScript(id: number): Promise<ScriptDefinition> {
   return apiFetch<ScriptDefinition>(`/api/scripts/${id}/`, {
     method: "DELETE"
   });
 }
 
-export async function listJobs(): Promise<DeploymentJob[]> {
-  return apiFetch<DeploymentJob[]>("/api/jobs/");
+export async function hardDeleteScript(id: number): Promise<{ detail: string }> {
+  return apiFetch<{ detail: string }>(`/api/scripts/${id}/hard-delete/`, {
+    method: "DELETE"
+  });
+}
+
+export interface DeploymentJobPage {
+  results: DeploymentJob[];
+  next_offset: number;
+  has_more: boolean;
+  count: number;
+}
+
+export async function listJobs({
+  limit,
+  offset
+}: {
+  limit: number;
+  offset: number;
+}): Promise<DeploymentJobPage> {
+  const query = new URLSearchParams({
+    limit: String(limit),
+    offset: String(offset)
+  });
+  return apiFetch<DeploymentJobPage>(`/api/jobs/?${query}`);
 }
 
 export async function getJob(id: string): Promise<DeploymentJob> {

@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import logging
 import time
+from pathlib import Path
 from typing import Any
 
+from django.conf import settings
 from django.db import IntegrityError, close_old_connections, transaction
 from django.db.models import Max
 from django.db.utils import OperationalError
@@ -40,6 +42,12 @@ TERMINAL_STATUSES = {
 }
 VALID_AGENT_STATUSES = {choice.value for choice in DeploymentJob.Status}
 LOG_STREAM_BATCH_SIZE = 200
+DEFAULT_JOBS_LIMIT = 20
+MAX_JOBS_LIMIT = 100
+DEFAULT_AGENT_INSTALL_DIR = "/opt/deploy-control-agent"
+DEFAULT_AGENT_PATH = f"{DEFAULT_AGENT_INSTALL_DIR}/deploy_agent.py"
+DEFAULT_AGENT_LOG_RETENTION_DAYS = 30
+DEFAULT_AGENT_LOG_CLEANUP_SECONDS = 3600
 
 
 def staff_required(request):
@@ -49,6 +57,17 @@ def staff_required(request):
         {"detail": "Admin permission is required."},
         status=status.HTTP_403_FORBIDDEN,
     )
+
+
+def parse_positive_int(value: str | None, default: int, maximum: int | None = None) -> int:
+    try:
+        parsed = int(value) if value is not None else default
+    except (TypeError, ValueError):
+        parsed = default
+    parsed = max(parsed, 0)
+    if maximum is not None:
+        parsed = min(parsed, maximum)
+    return parsed
 
 
 def authenticate_agent(request):
@@ -89,6 +108,20 @@ def touch_agent(target: TargetServer, request) -> None:
     target.save(update_fields=["last_seen_at", "agent_version", "updated_at"])
 
 
+def agent_source_path() -> Path:
+    configured_path = getattr(settings, "DEPLOY_AGENT_SOURCE_PATH", None)
+    if configured_path:
+        return Path(configured_path)
+    candidates = [
+        settings.BASE_DIR / "ops" / "target-agent" / "deploy_agent.py",
+        settings.BASE_DIR.parent / "ops" / "target-agent" / "deploy_agent.py",
+    ]
+    for path in candidates:
+        if path.exists():
+            return path
+    return candidates[0]
+
+
 class ServerSentEventRenderer(BaseRenderer):
     media_type = "text/event-stream"
     format = "event-stream"
@@ -110,6 +143,36 @@ class UserProfileView(APIView):
                     "is_staff": request.user.is_staff,
                 }
             ).data
+        )
+
+
+class AgentSetupGuideView(APIView):
+    def get(self, request):
+        forbidden = staff_required(request)
+        if forbidden is not None:
+            return forbidden
+
+        path = agent_source_path()
+        try:
+            agent_source = path.read_text(encoding="utf-8")
+        except OSError:
+            logger.exception("Could not read target agent source")
+            return Response(
+                {"detail": "Target agent source file is not available."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+        targets = TargetServer.objects.order_by("name", "id")
+        return Response(
+            {
+                "agent_filename": "deploy_agent.py",
+                "agent_source": agent_source,
+                "agent_install_dir": DEFAULT_AGENT_INSTALL_DIR,
+                "agent_path": DEFAULT_AGENT_PATH,
+                "log_retention_days": DEFAULT_AGENT_LOG_RETENTION_DAYS,
+                "log_cleanup_seconds": DEFAULT_AGENT_LOG_CLEANUP_SECONDS,
+                "targets": TargetServerSerializer(targets, many=True).data,
+            }
         )
 
 
@@ -169,6 +232,46 @@ class TargetServerDetailView(APIView):
                 updated_at=timezone.now(),
             )
         return Response(TargetServerSerializer(target).data)
+
+
+class TargetServerHardDeleteView(APIView):
+    def delete(self, request, id):
+        forbidden = staff_required(request)
+        if forbidden is not None:
+            return forbidden
+
+        with transaction.atomic():
+            target = get_object_or_404(TargetServer.objects.select_for_update(), id=id)
+            if DeploymentJob.objects.filter(
+                target_server=target,
+                status__in=ACTIVE_STATUSES,
+            ).exists():
+                return Response(
+                    {"detail": "Stop or finish active jobs before deleting this target."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            log_count = DeploymentJobLogLine.objects.filter(
+                job__target_server=target,
+            ).count()
+            job_count = DeploymentJob.objects.filter(target_server=target).count()
+            script_count = ScriptDefinition.objects.filter(target_server=target).count()
+            DeploymentJobLogLine.objects.filter(job__target_server=target).delete()
+            DeploymentJob.objects.filter(target_server=target).delete()
+            ScriptDefinition.objects.filter(target_server=target).delete()
+            target.delete()
+
+        return Response(
+            {
+                "detail": "Target server permanently deleted.",
+                "deleted": {
+                    "targets": 1,
+                    "scripts": script_count,
+                    "jobs": job_count,
+                    "log_lines": log_count,
+                },
+            }
+        )
 
 
 class TargetServerTestConnectionView(APIView):
@@ -247,6 +350,41 @@ class ScriptDefinitionDetailView(APIView):
         return Response(ScriptDefinitionSerializer(script).data)
 
 
+class ScriptDefinitionHardDeleteView(APIView):
+    def delete(self, request, id):
+        forbidden = staff_required(request)
+        if forbidden is not None:
+            return forbidden
+
+        with transaction.atomic():
+            script = get_object_or_404(ScriptDefinition.objects.select_for_update(), id=id)
+            if DeploymentJob.objects.filter(
+                script=script,
+                status__in=ACTIVE_STATUSES,
+            ).exists():
+                return Response(
+                    {"detail": "Stop or finish active jobs before deleting this script."},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            log_count = DeploymentJobLogLine.objects.filter(job__script=script).count()
+            job_count = DeploymentJob.objects.filter(script=script).count()
+            DeploymentJobLogLine.objects.filter(job__script=script).delete()
+            DeploymentJob.objects.filter(script=script).delete()
+            script.delete()
+
+        return Response(
+            {
+                "detail": "Script permanently deleted.",
+                "deleted": {
+                    "scripts": 1,
+                    "jobs": job_count,
+                    "log_lines": log_count,
+                },
+            }
+        )
+
+
 class JobsListView(APIView):
     def get(self, request):
         jobs = DeploymentJob.objects.select_related(
@@ -254,8 +392,28 @@ class JobsListView(APIView):
             "script__target_server",
             "target_server",
             "started_by",
-        )[:50]
-        return Response(DeploymentJobSerializer(jobs, many=True).data)
+        )
+
+        if "limit" not in request.query_params and "offset" not in request.query_params:
+            return Response(DeploymentJobSerializer(jobs[:50], many=True).data)
+
+        limit = parse_positive_int(
+            request.query_params.get("limit"),
+            default=DEFAULT_JOBS_LIMIT,
+            maximum=MAX_JOBS_LIMIT,
+        )
+        offset = parse_positive_int(request.query_params.get("offset"), default=0)
+        count = jobs.count()
+        page = list(jobs[offset : offset + limit])
+        next_offset = offset + len(page)
+        return Response(
+            {
+                "results": DeploymentJobSerializer(page, many=True).data,
+                "next_offset": next_offset,
+                "has_more": next_offset < count,
+                "count": count,
+            }
+        )
 
 
 class JobDetailView(APIView):

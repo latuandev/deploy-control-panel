@@ -64,6 +64,281 @@ class TargetServerDeletionTests(APITestCase):
         self.assertFalse(linked_script.enabled)
         self.assertTrue(unrelated_script.enabled)
 
+    def test_hard_delete_target_removes_only_related_scripts_jobs_and_logs(self):
+        user = get_user_model().objects.create_user(
+            username="admin",
+            password="password",
+            is_staff=True,
+        )
+        deleted_target = TargetServer.objects.create(
+            slug="hard-delete-target",
+            name="Hard delete target",
+            agent_token_hash=TargetServer.hash_agent_token("hard-delete-token"),
+            agent_token_prefix=TargetServer.token_prefix("hard-delete-token"),
+            allowed_script_dir="/opt/scripts",
+            log_dir="/var/log/deploy",
+        )
+        other_target = TargetServer.objects.create(
+            slug="kept-target",
+            name="Kept target",
+            agent_token_hash=TargetServer.hash_agent_token("kept-token"),
+            agent_token_prefix=TargetServer.token_prefix("kept-token"),
+            allowed_script_dir="/opt/scripts",
+            log_dir="/var/log/deploy",
+        )
+        deleted_script = ScriptDefinition.objects.create(
+            target_server=deleted_target,
+            slug="hard-delete-script",
+            label="Hard delete script",
+            remote_key="hard-delete-script",
+            remote_script_path="/opt/scripts/hard-delete.sh",
+        )
+        kept_script = ScriptDefinition.objects.create(
+            target_server=other_target,
+            slug="kept-script",
+            label="Kept script",
+            remote_key="kept-script",
+            remote_script_path="/opt/scripts/kept.sh",
+        )
+        deleted_job = DeploymentJob.objects.create(
+            script=deleted_script,
+            target_server=deleted_target,
+            status=DeploymentJob.Status.SUCCESS,
+            exit_code=0,
+            started_by=user,
+            started_at=timezone.now(),
+            finished_at=timezone.now(),
+        )
+        kept_job = DeploymentJob.objects.create(
+            script=kept_script,
+            target_server=other_target,
+            status=DeploymentJob.Status.SUCCESS,
+            exit_code=0,
+            started_by=user,
+            started_at=timezone.now(),
+            finished_at=timezone.now(),
+        )
+        DeploymentJobLogLine.objects.create(
+            job=deleted_job,
+            sequence=1,
+            line="deleted log",
+        )
+        DeploymentJobLogLine.objects.create(
+            job=kept_job,
+            sequence=1,
+            line="kept log",
+        )
+
+        self.client.force_authenticate(user=user)
+        response = self.client.delete(
+            reverse("targets-hard-delete", kwargs={"id": deleted_target.id})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["deleted"],
+            {"targets": 1, "scripts": 1, "jobs": 1, "log_lines": 1},
+        )
+        self.assertFalse(TargetServer.objects.filter(id=deleted_target.id).exists())
+        self.assertFalse(ScriptDefinition.objects.filter(id=deleted_script.id).exists())
+        self.assertFalse(DeploymentJob.objects.filter(id=deleted_job.id).exists())
+        self.assertFalse(DeploymentJobLogLine.objects.filter(job_id=deleted_job.id).exists())
+        self.assertTrue(TargetServer.objects.filter(id=other_target.id).exists())
+        self.assertTrue(ScriptDefinition.objects.filter(id=kept_script.id).exists())
+        self.assertTrue(DeploymentJob.objects.filter(id=kept_job.id).exists())
+        self.assertTrue(DeploymentJobLogLine.objects.filter(job_id=kept_job.id).exists())
+
+    def test_hard_delete_target_rejects_active_jobs(self):
+        user = get_user_model().objects.create_user(
+            username="admin",
+            password="password",
+            is_staff=True,
+        )
+        target = TargetServer.objects.create(
+            slug="active-target",
+            name="Active target",
+            agent_token_hash=TargetServer.hash_agent_token("active-token"),
+            agent_token_prefix=TargetServer.token_prefix("active-token"),
+            allowed_script_dir="/opt/scripts",
+            log_dir="/var/log/deploy",
+        )
+        script = ScriptDefinition.objects.create(
+            target_server=target,
+            slug="active-script",
+            label="Active script",
+            remote_key="active-script",
+            remote_script_path="/opt/scripts/active.sh",
+        )
+        DeploymentJob.objects.create(
+            script=script,
+            target_server=target,
+            status=DeploymentJob.Status.RUNNING,
+            started_by=user,
+            started_at=timezone.now(),
+        )
+
+        self.client.force_authenticate(user=user)
+        response = self.client.delete(
+            reverse("targets-hard-delete", kwargs={"id": target.id})
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(TargetServer.objects.filter(id=target.id).exists())
+        self.assertTrue(ScriptDefinition.objects.filter(id=script.id).exists())
+
+
+class ScriptDefinitionDeletionTests(APITestCase):
+    def test_hard_delete_script_removes_only_related_jobs_and_logs(self):
+        user = get_user_model().objects.create_user(
+            username="admin",
+            password="password",
+            is_staff=True,
+        )
+        target = TargetServer.objects.create(
+            slug="script-delete-target",
+            name="Script delete target",
+            agent_token_hash=TargetServer.hash_agent_token("script-delete-token"),
+            agent_token_prefix=TargetServer.token_prefix("script-delete-token"),
+            allowed_script_dir="/opt/scripts",
+            log_dir="/var/log/deploy",
+        )
+        deleted_script = ScriptDefinition.objects.create(
+            target_server=target,
+            slug="script-hard-delete",
+            label="Script hard delete",
+            remote_key="script-hard-delete",
+            remote_script_path="/opt/scripts/script-hard-delete.sh",
+        )
+        kept_script = ScriptDefinition.objects.create(
+            target_server=target,
+            slug="script-kept",
+            label="Script kept",
+            remote_key="script-kept",
+            remote_script_path="/opt/scripts/script-kept.sh",
+        )
+        deleted_job = DeploymentJob.objects.create(
+            script=deleted_script,
+            target_server=target,
+            status=DeploymentJob.Status.SUCCESS,
+            exit_code=0,
+            started_by=user,
+            started_at=timezone.now(),
+            finished_at=timezone.now(),
+        )
+        kept_job = DeploymentJob.objects.create(
+            script=kept_script,
+            target_server=target,
+            status=DeploymentJob.Status.SUCCESS,
+            exit_code=0,
+            started_by=user,
+            started_at=timezone.now(),
+            finished_at=timezone.now(),
+        )
+        DeploymentJobLogLine.objects.create(
+            job=deleted_job,
+            sequence=1,
+            line="deleted script log",
+        )
+        DeploymentJobLogLine.objects.create(
+            job=kept_job,
+            sequence=1,
+            line="kept script log",
+        )
+
+        self.client.force_authenticate(user=user)
+        response = self.client.delete(
+            reverse("scripts-hard-delete", kwargs={"id": deleted_script.id})
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            response.data["deleted"],
+            {"scripts": 1, "jobs": 1, "log_lines": 1},
+        )
+        self.assertTrue(TargetServer.objects.filter(id=target.id).exists())
+        self.assertFalse(ScriptDefinition.objects.filter(id=deleted_script.id).exists())
+        self.assertFalse(DeploymentJob.objects.filter(id=deleted_job.id).exists())
+        self.assertFalse(DeploymentJobLogLine.objects.filter(job_id=deleted_job.id).exists())
+        self.assertTrue(ScriptDefinition.objects.filter(id=kept_script.id).exists())
+        self.assertTrue(DeploymentJob.objects.filter(id=kept_job.id).exists())
+        self.assertTrue(DeploymentJobLogLine.objects.filter(job_id=kept_job.id).exists())
+
+    def test_hard_delete_script_rejects_active_jobs(self):
+        user = get_user_model().objects.create_user(
+            username="admin",
+            password="password",
+            is_staff=True,
+        )
+        target = TargetServer.objects.create(
+            slug="active-script-target",
+            name="Active script target",
+            agent_token_hash=TargetServer.hash_agent_token("active-script-token"),
+            agent_token_prefix=TargetServer.token_prefix("active-script-token"),
+            allowed_script_dir="/opt/scripts",
+            log_dir="/var/log/deploy",
+        )
+        script = ScriptDefinition.objects.create(
+            target_server=target,
+            slug="script-with-active-job",
+            label="Script with active job",
+            remote_key="script-with-active-job",
+            remote_script_path="/opt/scripts/active-script.sh",
+        )
+        DeploymentJob.objects.create(
+            script=script,
+            target_server=target,
+            status=DeploymentJob.Status.QUEUED,
+            started_by=user,
+            started_at=timezone.now(),
+        )
+
+        self.client.force_authenticate(user=user)
+        response = self.client.delete(
+            reverse("scripts-hard-delete", kwargs={"id": script.id})
+        )
+
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(ScriptDefinition.objects.filter(id=script.id).exists())
+
+
+class AgentSetupGuideTests(APITestCase):
+    def test_staff_can_read_agent_setup_guide(self):
+        user = get_user_model().objects.create_user(
+            username="admin",
+            password="password",
+            is_staff=True,
+        )
+        target = TargetServer.objects.create(
+            slug="setup-target",
+            name="Setup target",
+            agent_token_hash=TargetServer.hash_agent_token("setup-token"),
+            agent_token_prefix=TargetServer.token_prefix("setup-token"),
+            allowed_script_dir="/opt/scripts",
+            log_dir="/home/deployer/logs/deploy",
+        )
+
+        self.client.force_authenticate(user=user)
+        response = self.client.get(reverse("setup-agent"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data["agent_filename"], "deploy_agent.py")
+        self.assertEqual(response.data["agent_path"], "/opt/deploy-control-agent/deploy_agent.py")
+        self.assertEqual(response.data["log_retention_days"], 30)
+        self.assertIn("def cleanup_old_logs", response.data["agent_source"])
+        self.assertEqual(response.data["targets"][0]["id"], target.id)
+
+    def test_non_staff_cannot_read_agent_setup_guide(self):
+        user = get_user_model().objects.create_user(
+            username="member",
+            password="password",
+            is_staff=False,
+        )
+
+        self.client.force_authenticate(user=user)
+        response = self.client.get(reverse("setup-agent"))
+
+        self.assertEqual(response.status_code, 403)
+
 
 class JobLogsStreamNegotiationTests(APITestCase):
     def test_log_stream_accepts_event_stream_header(self):
@@ -77,7 +352,7 @@ class JobLogsStreamNegotiationTests(APITestCase):
             agent_token_hash=TargetServer.hash_agent_token("test-token"),
             agent_token_prefix=TargetServer.token_prefix("test-token"),
             allowed_script_dir="/opt/scripts",
-            log_dir="/home/tuanle/logs/deploy",
+            log_dir="/home/deployer/logs/deploy",
         )
         script = ScriptDefinition.objects.create(
             target_server=target,
@@ -104,6 +379,64 @@ class JobLogsStreamNegotiationTests(APITestCase):
         self.assertTrue(response.streaming)
         self.assertTrue(response["Content-Type"].startswith("text/event-stream"))
         response.close()
+
+
+class JobsListPaginationTests(APITestCase):
+    def test_jobs_list_supports_limit_offset_pagination(self):
+        user = get_user_model().objects.create_user(
+            username="admin",
+            password="password",
+        )
+        target = TargetServer.objects.create(
+            slug="jobs-page-target",
+            name="Jobs page target",
+            agent_token_hash=TargetServer.hash_agent_token("jobs-page-token"),
+            agent_token_prefix=TargetServer.token_prefix("jobs-page-token"),
+            allowed_script_dir="/opt/scripts",
+            log_dir="/var/log/deploy",
+        )
+        script = ScriptDefinition.objects.create(
+            target_server=target,
+            slug="jobs-page-script",
+            label="Jobs page script",
+            remote_key="jobs-page-script",
+            remote_script_path="/opt/scripts/jobs-page.sh",
+        )
+        started_at = timezone.now()
+        for index in range(25):
+            DeploymentJob.objects.create(
+                script=script,
+                target_server=target,
+                status=DeploymentJob.Status.SUCCESS,
+                exit_code=0,
+                started_by=user,
+                started_at=started_at,
+                finished_at=started_at,
+                agent_run_id=f"run-{index:02d}",
+            )
+
+        self.client.force_authenticate(user=user)
+        first_page = self.client.get(
+            reverse("jobs-list"),
+            {"limit": 10, "offset": 0},
+        )
+        third_page = self.client.get(
+            reverse("jobs-list"),
+            {"limit": 10, "offset": 20},
+        )
+        legacy_response = self.client.get(reverse("jobs-list"))
+
+        self.assertEqual(first_page.status_code, 200)
+        self.assertEqual(len(first_page.data["results"]), 10)
+        self.assertEqual(first_page.data["next_offset"], 10)
+        self.assertTrue(first_page.data["has_more"])
+        self.assertEqual(first_page.data["count"], 25)
+        self.assertEqual(third_page.status_code, 200)
+        self.assertEqual(len(third_page.data["results"]), 5)
+        self.assertEqual(third_page.data["next_offset"], 25)
+        self.assertFalse(third_page.data["has_more"])
+        self.assertEqual(legacy_response.status_code, 200)
+        self.assertEqual(len(legacy_response.data), 25)
 
 
 class JobLogReplayTests(APITransactionTestCase):
