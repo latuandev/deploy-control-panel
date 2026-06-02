@@ -6,6 +6,7 @@ from .views import (
     AgentJobLogsView,
     AgentJobStatusView,
     AgentPingView,
+    AgentSetupGuideView,
     JobDetailView,
     JobLogsStreamView,
     JobRefreshStatusView,
@@ -13,8 +14,10 @@ from .views import (
     JobStopView,
     JobsListView,
     ScriptDefinitionDetailView,
+    ScriptDefinitionHardDeleteView,
     ScriptsListView,
     TargetServerDetailView,
+    TargetServerHardDeleteView,
     TargetServerTestConnectionView,
     TargetServersListView,
     UserProfileView,
@@ -22,8 +25,14 @@ from .views import (
 
 urlpatterns = [
     path("me/", UserProfileView.as_view(), name="user-profile"),
+    path("setup/agent/", AgentSetupGuideView.as_view(), name="setup-agent"),
     path("targets/", TargetServersListView.as_view(), name="targets-list"),
     path("targets/<int:id>/", TargetServerDetailView.as_view(), name="targets-detail"),
+    path(
+        "targets/<int:id>/hard-delete/",
+        TargetServerHardDeleteView.as_view(),
+        name="targets-hard-delete",
+    ),
     path(
         "targets/<int:id>/test-connection/",
         TargetServerTestConnectionView.as_view(),
@@ -31,6 +40,11 @@ urlpatterns = [
     ),
     path("scripts/", ScriptsListView.as_view(), name="scripts-list"),
     path("scripts/<int:id>/", ScriptDefinitionDetailView.as_view(), name="scripts-detail"),
+    path(
+        "scripts/<int:id>/hard-delete/",
+        ScriptDefinitionHardDeleteView.as_view(),
+        name="scripts-hard-delete",
+    ),
     path("jobs/", JobsListView.as_view(), name="jobs-list"),
     path("jobs/start/", JobStartView.as_view(), name="jobs-start"),
     path("jobs/<uuid:id>/", JobDetailView.as_view(), name="jobs-detail"),

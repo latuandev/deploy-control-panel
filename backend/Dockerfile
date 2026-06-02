@@ -5,10 +5,12 @@ ENV PYTHONUNBUFFERED=1
 
 WORKDIR /app
 
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY backend/ .
+RUN mkdir -p /app/ops/target-agent
+COPY ops/target-agent/deploy_agent.py /app/ops/target-agent/deploy_agent.py
 RUN chmod +x /app/entrypoint.sh
 
 EXPOSE 8000

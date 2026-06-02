@@ -121,10 +121,12 @@ DEPLOY_CONTROL_API_URL=https://deploy-control-api.example.com \
 DEPLOY_AGENT_TOKEN=PASTE_AGENT_TOKEN_HERE \
 DEPLOY_ALLOWED_SCRIPT_DIR=/opt/scripts \
 DEPLOY_LOG_DIR=/home/deployer/logs/deploy \
+DEPLOY_LOG_RETENTION_DAYS=30 \
 python3 /opt/deploy-control-agent/deploy_agent.py
 ```
 
 For production, run the agent with systemd or another process supervisor.
+The agent removes local `.log` files in `DEPLOY_LOG_DIR` older than `DEPLOY_LOG_RETENTION_DAYS`; logs already sent to the control panel remain in the control panel database.
 
 Install a systemd unit:
 
@@ -142,6 +144,7 @@ Environment=DEPLOY_CONTROL_API_URL=https://deploy-control-api.example.com
 Environment=DEPLOY_AGENT_TOKEN=PASTE_AGENT_TOKEN_HERE
 Environment=DEPLOY_ALLOWED_SCRIPT_DIR=/opt/scripts
 Environment=DEPLOY_LOG_DIR=/home/deployer/logs/deploy
+Environment=DEPLOY_LOG_RETENTION_DAYS=30
 ExecStart=/usr/bin/python3 /opt/deploy-control-agent/deploy_agent.py
 Restart=always
 RestartSec=5
@@ -238,17 +241,20 @@ User-facing API:
 - `POST /api/auth/token/`
 - `POST /api/auth/token/refresh/`
 - `GET /api/me/`
+- `GET /api/setup/agent/`
 - `GET /api/targets/`
 - `POST /api/targets/`
 - `GET /api/targets/<int:id>/`
 - `PATCH /api/targets/<int:id>/`
 - `DELETE /api/targets/<int:id>/`
+- `DELETE /api/targets/<int:id>/hard-delete/`
 - `POST /api/targets/<int:id>/test-connection/`
 - `GET /api/scripts/`
 - `POST /api/scripts/`
 - `GET /api/scripts/<int:id>/`
 - `PATCH /api/scripts/<int:id>/`
 - `DELETE /api/scripts/<int:id>/`
+- `DELETE /api/scripts/<int:id>/hard-delete/`
 - `POST /api/jobs/start/`
 - `GET /api/jobs/`
 - `GET /api/jobs/<uuid:id>/`
@@ -297,6 +303,7 @@ DEPLOY_CONTROL_API_URL
 DEPLOY_AGENT_TOKEN
 DEPLOY_ALLOWED_SCRIPT_DIR
 DEPLOY_LOG_DIR
+DEPLOY_LOG_RETENTION_DAYS
 ```
 
 ### Script Is Not Picked Up
